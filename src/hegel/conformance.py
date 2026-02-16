@@ -42,8 +42,9 @@ class ConformanceTest(ABC):
     default_test_cases: int = 50
     registered_tests: ClassVar[set[type["ConformanceTest"]]] = set()
 
-    def __init_subclass__(cls) -> None:
-        cls.registered_tests.add(cls)
+    def __init_subclass__(cls, *, _register: bool = True) -> None:
+        if _register:
+            cls.registered_tests.add(cls)
 
     def __init__(
         self,
@@ -97,6 +98,86 @@ class ConformanceTest(ABC):
             ]
 
         self.validate(metrics_list, params)
+
+
+class ErrorHandlingConformance(ConformanceTest, ABC, _register=False):
+    """Base class for error handling conformance tests.
+
+    These tests set HEGEL_TEST_MODE to activate the test server,
+    which injects specific error conditions. The SDK binary is run
+    with empty params and must exit cleanly (exit code 0).
+    """
+
+    test_mode: str
+
+    def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
+        return st.just({})
+
+    def validate(
+        self,
+        metrics_list: list[dict[str, Any]],
+        params: dict[str, Any],
+    ) -> None:
+        # No metrics validation needed — the test passes if the binary
+        # exits with code 0 (checked in run()).
+        pass
+
+    def run(self, params: dict[str, Any]) -> None:
+        """Run the conformance binary with HEGEL_TEST_MODE set."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+            metrics_file = Path(f.name)
+            input_json = json.dumps(params)
+
+            result = subprocess.run(
+                [str(self.binary), input_json],
+                env={
+                    **os.environ,
+                    "CONFORMANCE_METRICS_FILE": str(metrics_file),
+                    "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    "HEGEL_TEST_MODE": self.test_mode,
+                },
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Conformance binary failed with exit code {result.returncode}\n"
+                    f"stdout: {result.stdout}\n"
+                    f"stderr: {result.stderr}",
+                )
+
+            metrics_list = [
+                json.loads(line)
+                for line in metrics_file.read_text().splitlines()
+                if line.strip()
+            ]
+
+        self.validate(metrics_list, params)
+
+
+class StopTestOnGenerateConformance(ErrorHandlingConformance):
+    """Conformance test for StopTest error on generate command."""
+
+    test_mode = "stop_test_on_generate"
+
+
+class StopTestOnMarkCompleteConformance(ErrorHandlingConformance):
+    """Conformance test for StopTest error on mark_complete command."""
+
+    test_mode = "stop_test_on_mark_complete"
+
+
+class ErrorResponseConformance(ErrorHandlingConformance):
+    """Conformance test for generic error response handling."""
+
+    test_mode = "error_response"
+
+
+class EmptyTestConformance(ErrorHandlingConformance):
+    """Conformance test for empty test run (no test cases)."""
+
+    test_mode = "empty_test"
 
 
 class BooleanConformance(ConformanceTest):

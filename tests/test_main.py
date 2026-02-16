@@ -2,6 +2,7 @@
 
 import contextlib
 import importlib.metadata
+import os
 import socket
 import tempfile
 import time
@@ -28,15 +29,28 @@ def socket_path():
 
 
 @contextlib.contextmanager
-def _client_and_server(socket_path, *args):
+def _client_and_server(socket_path, *args, env=None):
     """Start the CLI server and yield a connected Client."""
 
     def run_cli():
-        CliRunner().invoke(
-            main,
-            [str(socket_path), *args],
-            catch_exceptions=False,
-        )
+        if env:
+            old_env = {}
+            for k, v in env.items():
+                old_env[k] = os.environ.get(k)
+                os.environ[k] = v
+        try:
+            CliRunner().invoke(
+                main,
+                [str(socket_path), *args],
+                catch_exceptions=False,
+            )
+        finally:
+            if env:
+                for k, v in old_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
 
     t = Thread(target=run_cli, daemon=True)
     t.start()
@@ -82,4 +96,12 @@ def test_cli_cleans_up_stale_socket(socket_path):
     socket_path.touch()
 
     with _client_and_server(socket_path) as client:
+        client.run_test("test", lambda: None, test_cases=1)
+
+
+def test_run_server_with_test_mode(socket_path):
+    """Test run_server routes to test_server when HEGEL_TEST_MODE is set."""
+    with _client_and_server(
+        socket_path, env={"HEGEL_TEST_MODE": "empty_test"}
+    ) as client:
         client.run_test("test", lambda: None, test_cases=1)
