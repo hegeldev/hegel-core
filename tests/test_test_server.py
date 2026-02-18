@@ -76,6 +76,61 @@ def _send_generate_expect_error(data_channel):
     return raw
 
 
+def _send_start_span(data_channel, label=1):
+    """Send a start_span command."""
+    return data_channel.receive_response(
+        data_channel.send_request({"command": "start_span", "label": label}),
+    )
+
+
+def _send_new_collection(data_channel, *, min_size=0, max_size=10):
+    """Send a new_collection command and return the collection name."""
+    return data_channel.receive_response(
+        data_channel.send_request(
+            {
+                "command": "new_collection",
+                "name": "list",
+                "min_size": min_size,
+                "max_size": max_size,
+            },
+        ),
+    )
+
+
+def _send_new_collection_expect_error(data_channel, *, min_size=0, max_size=10):
+    """Send a new_collection command expecting a StopTest error."""
+    msg_id = data_channel.send_request(
+        {
+            "command": "new_collection",
+            "name": "list",
+            "min_size": min_size,
+            "max_size": max_size,
+        },
+    )
+    raw = cbor2.loads(data_channel.receive_response_raw(msg_id))
+    assert "error" in raw
+    return raw
+
+
+def _send_collection_more(data_channel, collection):
+    """Send a collection_more command."""
+    return data_channel.receive_response(
+        data_channel.send_request(
+            {"command": "collection_more", "collection": collection},
+        ),
+    )
+
+
+def _send_collection_more_expect_error(data_channel, collection):
+    """Send a collection_more command expecting a StopTest error."""
+    msg_id = data_channel.send_request(
+        {"command": "collection_more", "collection": collection},
+    )
+    raw = cbor2.loads(data_channel.receive_response_raw(msg_id))
+    assert "error" in raw
+    return raw
+
+
 def _send_mark_complete(data_channel, *, status="VALID"):
     """Send a mark_complete command."""
     return data_channel.receive_response(
@@ -244,6 +299,91 @@ class TestConnectionErrorHandling:
         conn.close()
 
         server_thread.join(timeout=5.0)
+
+
+class TestStopTestOnCollectionMore:
+    def test_server_sends_stop_test_on_collection_more(self):
+        s1, s2 = _create_socket_pair()
+        server_thread = _start_server(s1, "stop_test_on_collection_more")
+
+        conn = _setup_client(s2)
+        test_channel = _send_run_test(conn)
+
+        data_ch, _ = _receive_test_case(test_channel, conn)
+
+        # SDK sends start_span (LIST) + new_collection normally
+        _send_start_span(data_ch, label=1)
+        collection = _send_new_collection(data_ch)
+        assert isinstance(collection, str)
+
+        # collection_more should get StopTest
+        error = _send_collection_more_expect_error(data_ch, collection)
+        assert error["type"] == "StopTest"
+
+        # Don't send further commands
+        _receive_test_done(test_channel)
+
+        conn.close()
+        server_thread.join(timeout=2.0)
+
+    def test_lifecycle_completes(self):
+        s1, s2 = _create_socket_pair()
+        server_thread = _start_server(s1, "stop_test_on_collection_more")
+
+        conn = _setup_client(s2)
+        test_channel = _send_run_test(conn)
+
+        data_ch, _ = _receive_test_case(test_channel, conn)
+        _send_start_span(data_ch, label=1)
+        collection = _send_new_collection(data_ch)
+        _send_collection_more_expect_error(data_ch, collection)
+
+        results = _receive_test_done(test_channel)
+        assert "passed" in results
+
+        conn.close()
+        server_thread.join(timeout=2.0)
+
+
+class TestStopTestOnNewCollection:
+    def test_server_sends_stop_test_on_new_collection(self):
+        s1, s2 = _create_socket_pair()
+        server_thread = _start_server(s1, "stop_test_on_new_collection")
+
+        conn = _setup_client(s2)
+        test_channel = _send_run_test(conn)
+
+        data_ch, _ = _receive_test_case(test_channel, conn)
+
+        # SDK sends start_span (LIST) normally
+        _send_start_span(data_ch, label=1)
+
+        # new_collection should get StopTest
+        error = _send_new_collection_expect_error(data_ch)
+        assert error["type"] == "StopTest"
+
+        # Don't send further commands
+        _receive_test_done(test_channel)
+
+        conn.close()
+        server_thread.join(timeout=2.0)
+
+    def test_lifecycle_completes(self):
+        s1, s2 = _create_socket_pair()
+        server_thread = _start_server(s1, "stop_test_on_new_collection")
+
+        conn = _setup_client(s2)
+        test_channel = _send_run_test(conn)
+
+        data_ch, _ = _receive_test_case(test_channel, conn)
+        _send_start_span(data_ch, label=1)
+        _send_new_collection_expect_error(data_ch)
+
+        results = _receive_test_done(test_channel)
+        assert "passed" in results
+
+        conn.close()
+        server_thread.join(timeout=2.0)
 
 
 class TestTestServerErrors:

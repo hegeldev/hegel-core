@@ -180,6 +180,18 @@ class EmptyTestConformance(ErrorHandlingConformance):
     test_mode = "empty_test"
 
 
+class StopTestOnCollectionMoreConformance(ErrorHandlingConformance):
+    """Conformance test for StopTest error on collection_more command."""
+
+    test_mode = "stop_test_on_collection_more"
+
+
+class StopTestOnNewCollectionConformance(ErrorHandlingConformance):
+    """Conformance test for StopTest error on new_collection command."""
+
+    test_mode = "stop_test_on_new_collection"
+
+
 class BooleanConformance(ConformanceTest):
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
         return st.just({})

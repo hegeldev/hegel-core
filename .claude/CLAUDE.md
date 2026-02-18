@@ -52,7 +52,7 @@ Binary protocol over Unix socket with CBOR-encoded payloads:
 
 - `__main__.py` - CLI entry point (`hegel` command via click), binds Unix socket and starts server
 - `server.py` - Drives test execution via Hypothesis `ConjectureRunner` with a `ThreadPoolExecutor`
-- `protocol.py` - Binary protocol with CBOR encoding, multiplexed channels, thread-safe `Connection`
+- `protocol.py` - Binary protocol with CBOR encoding, multiplexed channels, demand-driven reader (no background thread)
 - `schema.py` - JSON Schema to Hypothesis strategy conversion (cached by SHA1 hash in `FROM_SCHEMA_CACHE`)
 - `conformance.py` - Framework for testing SDK implementations against specification (`ConformanceTest` base class with `__init_subclass__` auto-registration)
 
