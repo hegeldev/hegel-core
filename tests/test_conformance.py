@@ -274,6 +274,16 @@ def test_run_conformance_tests_full(subtests, conformance_binary):
         StopTestOnNewCollectionConformance(binary_path, test_cases=1),
     ]
 
+    # Mock the run method on each test to avoid binary execution
+    for t in tests:
+        t.run = MagicMock()
+
+    run_conformance_tests(
+        tests,
+        subtests,
+        settings=settings(max_examples=1, deadline=None),
+    )
+
 
 def test_boolean_run(conformance_binary):
     binary_path = conformance_binary(
