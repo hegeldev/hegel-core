@@ -10,8 +10,13 @@ Modes:
 - stop_test_on_mark_complete: StopTest error on mark_complete
 - stop_test_on_collection_more: StopTest error on first collection_more
 - stop_test_on_new_collection: StopTest error on new_collection
+- stop_test_on_start_span: StopTest error on start_span command
 - error_response: RequestError on first generate
 - empty_test: Immediately sends test_done with no test cases
+- server_crash: Server exits abruptly mid-test (simulates server crash)
+- health_check_failure: test_done reports a health check failure
+- server_error_in_results: test_done reports a server error
+- flaky_replay: FlakyReplay error on generate (simulates flaky test detection)
 """
 
 import time
@@ -30,8 +35,16 @@ def run_test_server(connection: Connection, mode: str) -> None:
         "stop_test_on_mark_complete": _mode_stop_test_on_mark_complete,
         "stop_test_on_collection_more": _mode_stop_test_on_collection_more,
         "stop_test_on_new_collection": _mode_stop_test_on_new_collection,
+        "stop_test_on_start_span": _mode_stop_test_on_start_span,
         "error_response": _mode_error_response,
         "empty_test": _mode_empty_test,
+        "server_crash": _mode_server_crash,
+        "health_check_failure": _mode_health_check_failure,
+        "server_error_in_results": _mode_server_error_in_results,
+        "flaky_replay": _mode_flaky_replay,
+        "failed_no_reason": _mode_failed_no_reason,
+        "stop_test_on_pool_add": _mode_stop_test_on_pool_add,
+        "stop_test_on_new_pool": _mode_stop_test_on_new_pool,
     }
 
     handler = modes.get(mode)
@@ -178,6 +191,8 @@ def _handle_commands_until(
     simple success value appropriate for the command type.
     """
     collection_counter = 0
+    pool_counter = 0
+    variable_counter = 0
     while True:
         msg_id, message = _read_cbor_request(data_channel)
         command = message.get("command")
@@ -189,9 +204,20 @@ def _handle_commands_until(
             name = f"collection_{collection_counter}"
             collection_counter += 1
             data_channel.write_reply(msg_id, name)
+        elif command == "new_pool":
+            pool_id = pool_counter
+            pool_counter += 1
+            data_channel.write_reply(msg_id, pool_id)
+        elif command == "pool_add":
+            var_id = variable_counter
+            variable_counter += 1
+            data_channel.write_reply(msg_id, var_id)
+        elif command == "generate":
+            # Reply with True (a valid CBOR boolean) so the client can deserialize it
+            data_channel.write_reply(msg_id, True)
         else:
-            # All other commands (generate, start_span, stop_span,
-            # mark_complete, etc.) get a simple None/True response.
+            # All other commands (start_span, stop_span,
+            # mark_complete, etc.) get a simple None response.
             data_channel.write_reply(msg_id, None)
 
 
@@ -271,6 +297,28 @@ def _mode_error_response(
     _send_test_done(test_channel)
 
 
+def _mode_stop_test_on_start_span(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send StopTest error on the start_span command.
+
+    1. Send test_case, handle first generate normally
+    2. Respond to start_span with StopTest
+    3. client must abort and not send mark_complete
+    4. Wait briefly, close data channel, send test_done
+    """
+    data_channel = _send_test_case(connection, test_channel)
+
+    msg_id = _handle_commands_until(data_channel, stop_on="start_span")
+    data_channel.write_reply_error(msg_id, error="StopTest", error_type="StopTest")
+
+    time.sleep(0.1)
+    data_channel.close()
+
+    _send_test_done(test_channel)
+
+
 def _mode_empty_test(
     connection: Connection,
     test_channel: Channel,
@@ -279,4 +327,170 @@ def _mode_empty_test(
 
     Validates the edge case where no test_case events are sent.
     """
+    _send_test_done(test_channel)
+
+
+def _mode_server_crash(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Simulate a server crash by closing the connection mid-test.
+
+    1. Send test_case, handle first generate normally
+    2. Close the underlying transport abruptly without sending test_done
+
+    The client should detect the broken pipe and panic with SERVER_CRASHED_MESSAGE.
+    """
+    data_channel = _send_test_case(connection, test_channel)
+
+    # Read the generate request but DON'T reply — just close.
+    # This makes the crash happen while the client is waiting for
+    # the generate response, triggering the ServerCrashed path in
+    # send_request_inner rather than in the event loop.
+    _read_cbor_request(data_channel)
+    raise ConnectionError("simulated server crash")
+
+
+def _mode_health_check_failure(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send test_done with a health_check_failure field.
+
+    1. Send test_case, handle normally
+    2. Send test_done with health_check_failure in results
+    """
+    data_channel = _send_test_case(connection, test_channel)
+    _handle_normal_generate(data_channel)
+    mc_id, _ = _wait_for_mark_complete(data_channel)
+    data_channel.write_reply(mc_id, None)
+    data_channel.close()
+
+    test_channel.send_request(
+        {
+            "event": "test_done",
+            "results": {
+                "passed": False,
+                "examples_run": 1,
+                "valid_test_cases": 1,
+                "invalid_test_cases": 0,
+                "interesting_test_cases": 0,
+                "health_check_failure": "Simulated health check failure for testing",
+            },
+        },
+    ).get()
+
+
+def _mode_server_error_in_results(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send test_done with an error field in results.
+
+    1. Send test_case, handle normally
+    2. Send test_done with error in results
+    """
+    data_channel = _send_test_case(connection, test_channel)
+    _handle_normal_generate(data_channel)
+    mc_id, _ = _wait_for_mark_complete(data_channel)
+    data_channel.write_reply(mc_id, None)
+    data_channel.close()
+
+    test_channel.send_request(
+        {
+            "event": "test_done",
+            "results": {
+                "passed": False,
+                "examples_run": 1,
+                "valid_test_cases": 1,
+                "invalid_test_cases": 0,
+                "interesting_test_cases": 0,
+                "error": "Simulated server error for testing",
+            },
+        },
+    ).get()
+
+
+def _mode_flaky_replay(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send FlakyReplay error on generate to simulate flaky test detection.
+
+    1. Send test_case
+    2. Respond to generate with FlakyReplay error
+    3. client should handle as a communication error
+    4. Send test_done
+    """
+    data_channel = _send_test_case(connection, test_channel)
+
+    msg_id, message = _read_cbor_request(data_channel)
+    assert message.get("command") == "generate"
+    data_channel.write_reply_error(
+        msg_id,
+        error="FlakyReplay: test behavior changed during replay",
+        error_type="FlakyReplay",
+    )
+
+    try:
+        mc_id, _ = _read_cbor_request(data_channel, timeout=2.0)
+        data_channel.write_reply(mc_id, None)
+    except (TimeoutError, ConnectionError):
+        pass
+
+    data_channel.close()
+    _send_test_done(test_channel)
+
+
+def _mode_failed_no_reason(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send test_done with passed=False but no error/health_check/flaky fields.
+
+    This triggers the "unknown" fallback in clients that extract failure messages.
+    """
+    data_channel = _send_test_case(connection, test_channel)
+    _handle_normal_generate(data_channel)
+    mc_id, _ = _wait_for_mark_complete(data_channel)
+    data_channel.write_reply(mc_id, None)
+    data_channel.close()
+
+    test_channel.send_request(
+        {
+            "event": "test_done",
+            "results": {
+                "passed": False,
+                "examples_run": 1,
+                "valid_test_cases": 1,
+                "invalid_test_cases": 0,
+                "interesting_test_cases": 0,
+            },
+        },
+    ).get()
+
+
+def _mode_stop_test_on_pool_add(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send StopTest error on pool_add command."""
+    data_channel = _send_test_case(connection, test_channel)
+    msg_id = _handle_commands_until(data_channel, stop_on="pool_add")
+    data_channel.write_reply_error(msg_id, error="StopTest", error_type="StopTest")
+    time.sleep(0.1)
+    data_channel.close()
+    _send_test_done(test_channel)
+
+
+def _mode_stop_test_on_new_pool(
+    connection: Connection,
+    test_channel: Channel,
+) -> None:
+    """Send StopTest error on new_pool command."""
+    data_channel = _send_test_case(connection, test_channel)
+    msg_id = _handle_commands_until(data_channel, stop_on="new_pool")
+    data_channel.write_reply_error(msg_id, error="StopTest", error_type="StopTest")
+    time.sleep(0.1)
+    data_channel.close()
     _send_test_done(test_channel)

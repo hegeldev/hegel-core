@@ -163,6 +163,115 @@ class StopTestOnCollectionMoreConformance(ErrorHandlingConformance):
     test_mode = "stop_test_on_collection_more"
 
 
+class StopTestOnStartSpanConformance(ErrorHandlingConformance):
+    """Conformance test for StopTest error on start_span command."""
+
+    test_mode = "stop_test_on_start_span"
+
+
+class ServerCrashConformance(ErrorHandlingConformance):
+    """Conformance test for server crash (process exit mid-test).
+
+    The client must detect the crash and panic with an appropriate message.
+    The binary is expected to exit with a non-zero exit code.
+    """
+
+    test_mode = "server_crash"
+
+    def run(self, params: dict[str, Any]) -> None:
+        import json
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+            input_json = json.dumps(params)
+            result = subprocess.run(
+                [str(self.binary), input_json],
+                env={
+                    **os.environ,
+                    "CONFORMANCE_METRICS_FILE": f.name,
+                    "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    **self.extra_env(),
+                },
+                capture_output=True,
+                text=True,
+            )
+            # Server crash should cause the client to exit with non-zero
+            assert result.returncode != 0, (
+                f"Expected non-zero exit for server crash, got 0\n"
+                f"stderr: {result.stderr}"
+            )
+
+
+class HealthCheckFailureConformance(ErrorHandlingConformance):
+    """Conformance test for health check failure reported in test_done."""
+
+    test_mode = "health_check_failure"
+
+    def run(self, params: dict[str, Any]) -> None:
+        import json
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+            input_json = json.dumps(params)
+            result = subprocess.run(
+                [str(self.binary), input_json],
+                env={
+                    **os.environ,
+                    "CONFORMANCE_METRICS_FILE": f.name,
+                    "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    **self.extra_env(),
+                },
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert (
+                "health check" in result.stderr.lower()
+                or "Health check" in result.stderr
+            )
+
+
+class ServerErrorInResultsConformance(ErrorHandlingConformance):
+    """Conformance test for server error reported in test_done results."""
+
+    test_mode = "server_error_in_results"
+
+    def run(self, params: dict[str, Any]) -> None:
+        import json
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+            input_json = json.dumps(params)
+            result = subprocess.run(
+                [str(self.binary), input_json],
+                env={
+                    **os.environ,
+                    "CONFORMANCE_METRICS_FILE": f.name,
+                    "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    **self.extra_env(),
+                },
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert (
+                "server error" in result.stderr.lower()
+                or "Server error" in result.stderr
+            )
+
+
+class FlakyReplayConformance(ErrorHandlingConformance):
+    """Conformance test for FlakyReplay error handling."""
+
+    test_mode = "flaky_replay"
+
+
 class StopTestOnNewCollectionConformance(ErrorHandlingConformance):
     """Conformance test for StopTest error on new_collection command."""
 

@@ -4,6 +4,7 @@ import socket
 from threading import Thread
 
 import cbor2
+import pytest
 
 from hegel.protocol.connection import Connection
 from hegel.test_server import run_test_server
@@ -427,3 +428,143 @@ class TestTestServerErrors:
             t.join(timeout=5.0)
             assert len(errors) == 1
             assert "nonexistent_mode" in str(errors[0])
+
+
+class TestStopTestOnStartSpan:
+    def test_lifecycle_completes(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "stop_test_on_start_span")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            # Send start_span — should get StopTest
+            packet = data_channel.write_request(
+                cbor2.dumps({"command": "start_span", "label": 1}),
+            )
+            raw = cbor2.loads(data_channel.read_reply(packet.message_id).payload)
+            assert raw.get("error") == "StopTest"
+            # Read test_done
+            done_packet = test_channel.read_request()
+            done_msg = cbor2.loads(done_packet.payload)
+            assert done_msg["event"] == "test_done"
+            test_channel.write_reply(done_packet.message_id, None)
+        t.join(timeout=5.0)
+
+
+class TestServerCrash:
+    def test_server_closes_connection(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "server_crash")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            # Server reads generate but crashes before replying.
+            # The send succeeds but the reply read fails.
+            with pytest.raises((ConnectionError, OSError)):
+                _send_generate(data_channel)
+        t.join(timeout=5.0)
+
+
+class TestHealthCheckFailure:
+    def test_results_contain_health_check_failure(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "health_check_failure")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            _send_generate(data_channel)
+            _send_mark_complete(data_channel)
+            done_packet = test_channel.read_request()
+            done_msg = cbor2.loads(done_packet.payload)
+            assert done_msg["event"] == "test_done"
+            assert "health_check_failure" in done_msg["results"]
+            test_channel.write_reply(done_packet.message_id, None)
+        t.join(timeout=5.0)
+
+
+class TestServerErrorInResults:
+    def test_results_contain_error(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "server_error_in_results")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            _send_generate(data_channel)
+            _send_mark_complete(data_channel)
+            done_packet = test_channel.read_request()
+            done_msg = cbor2.loads(done_packet.payload)
+            assert done_msg["event"] == "test_done"
+            assert "error" in done_msg["results"]
+            test_channel.write_reply(done_packet.message_id, None)
+        t.join(timeout=5.0)
+
+
+class TestFlakyReplay:
+    def test_server_sends_flaky_replay_error(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "flaky_replay")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            raw = _send_generate_expect_error(data_channel)
+            assert "FlakyReplay" in str(raw)
+            # Send mark_complete after the error (exercises the try path in the mode)
+            _send_mark_complete(data_channel)
+        t.join(timeout=5.0)
+
+
+class TestFailedNoReason:
+    def test_results_failed_with_no_error_fields(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "failed_no_reason")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            _send_generate(data_channel)
+            _send_mark_complete(data_channel)
+            done_packet = test_channel.read_request()
+            done_msg = cbor2.loads(done_packet.payload)
+            assert done_msg["event"] == "test_done"
+            assert done_msg["results"]["passed"] is False
+            assert "error" not in done_msg["results"]
+            test_channel.write_reply(done_packet.message_id, None)
+        t.join(timeout=5.0)
+
+
+class TestStopTestOnPoolAdd:
+    def test_server_sends_stop_test_on_pool_add(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "stop_test_on_pool_add")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            # Send new_pool and generate before pool_add (realistic sequence)
+            # These are handled normally by _handle_commands_until
+            p1 = data_channel.write_request(cbor2.dumps({"command": "new_pool"}))
+            r1 = cbor2.loads(data_channel.read_reply(p1.message_id).payload)
+            assert r1.get("result") == 0  # pool id
+            p2 = data_channel.write_request(cbor2.dumps({"command": "generate"}))
+            r2 = cbor2.loads(data_channel.read_reply(p2.message_id).payload)
+            assert r2.get("result") is True  # boolean value
+            # Now pool_add triggers StopTest
+            packet = data_channel.write_request(
+                cbor2.dumps({"command": "pool_add"}),
+            )
+            raw = cbor2.loads(data_channel.read_reply(packet.message_id).payload)
+            assert raw.get("error") == "StopTest"
+        t.join(timeout=5.0)
+
+
+class TestStopTestOnNewPool:
+    def test_server_sends_stop_test_on_new_pool(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "stop_test_on_new_pool")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            packet = data_channel.write_request(
+                cbor2.dumps({"command": "new_pool"}),
+            )
+            raw = cbor2.loads(data_channel.read_reply(packet.message_id).payload)
+            assert raw.get("error") == "StopTest"
+        t.join(timeout=5.0)
