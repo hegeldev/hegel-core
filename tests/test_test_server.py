@@ -431,6 +431,31 @@ class TestTestServerErrors:
 
 
 class TestStopTestOnStartSpan:
+    def test_pool_commands_handled_before_start_span(self):
+        """Exercise new_pool/pool_add/generate handling in _handle_commands_until."""
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "stop_test_on_start_span")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            # Send new_pool, generate, pool_add before start_span
+            p1 = data_channel.write_request(cbor2.dumps({"command": "new_pool"}))
+            r1 = cbor2.loads(data_channel.read_reply(p1.message_id).payload)
+            assert r1.get("result") == 0
+            p2 = data_channel.write_request(cbor2.dumps({"command": "generate"}))
+            r2 = cbor2.loads(data_channel.read_reply(p2.message_id).payload)
+            assert r2.get("result") is True
+            p3 = data_channel.write_request(cbor2.dumps({"command": "pool_add"}))
+            r3 = cbor2.loads(data_channel.read_reply(p3.message_id).payload)
+            assert r3.get("result") == 0  # variable id
+            # Now start_span triggers StopTest
+            p4 = data_channel.write_request(
+                cbor2.dumps({"command": "start_span", "label": 1})
+            )
+            r4 = cbor2.loads(data_channel.read_reply(p4.message_id).payload)
+            assert r4.get("error") == "StopTest"
+        t.join(timeout=5.0)
+
     def test_lifecycle_completes(self):
         s1, s2 = _create_socket_pair()
         t = _start_server(s1, "stop_test_on_start_span")
@@ -500,7 +525,7 @@ class TestServerErrorInResults:
 
 
 class TestFlakyReplay:
-    def test_server_sends_flaky_replay_error(self):
+    def test_server_sends_flaky_replay_error_with_mark_complete(self):
         s1, s2 = _create_socket_pair()
         t = _start_server(s1, "flaky_replay")
         with _setup_client(s2) as client:
@@ -508,8 +533,19 @@ class TestFlakyReplay:
             data_channel, _ = _receive_test_case(test_channel, client)
             raw = _send_generate_expect_error(data_channel)
             assert "FlakyReplay" in str(raw)
-            # Send mark_complete after the error (exercises the try path in the mode)
+            # Send mark_complete (exercises the success path in the try block)
             _send_mark_complete(data_channel)
+        t.join(timeout=5.0)
+
+    def test_server_sends_flaky_replay_error_without_mark_complete(self):
+        s1, s2 = _create_socket_pair()
+        t = _start_server(s1, "flaky_replay")
+        with _setup_client(s2) as client:
+            test_channel = _send_run_test(client)
+            data_channel, _ = _receive_test_case(test_channel, client)
+            raw = _send_generate_expect_error(data_channel)
+            assert "FlakyReplay" in str(raw)
+            # Don't send mark_complete — exercises the except (timeout) path
         t.join(timeout=5.0)
 
 
