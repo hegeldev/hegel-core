@@ -179,11 +179,6 @@ class ServerCrashConformance(ErrorHandlingConformance):
     test_mode = "server_crash"
 
     def run(self, params: dict[str, Any]) -> None:
-        import json
-        import os
-        import subprocess
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
             input_json = json.dumps(params)
             result = subprocess.run(
@@ -210,11 +205,6 @@ class HealthCheckFailureConformance(ErrorHandlingConformance):
     test_mode = "health_check_failure"
 
     def run(self, params: dict[str, Any]) -> None:
-        import json
-        import os
-        import subprocess
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
             input_json = json.dumps(params)
             result = subprocess.run(
@@ -241,11 +231,6 @@ class ServerErrorInResultsConformance(ErrorHandlingConformance):
     test_mode = "server_error_in_results"
 
     def run(self, params: dict[str, Any]) -> None:
-        import json
-        import os
-        import subprocess
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
             input_json = json.dumps(params)
             result = subprocess.run(
