@@ -102,6 +102,15 @@ def run_server(socket_path: Path, *, verbosity: Verbosity = Verbosity.normal) ->
     try:
         client_sock, _ = server_sock.accept()
 
+        # Increase socket buffer sizes to match Linux defaults (128 KB).
+        # macOS defaults to ~8 KB for Unix domain sockets, which can
+        # cause a deadlock when a writer thread blocks on a full send
+        # buffer while holding the write lock, preventing other threads
+        # from sending responses the client is waiting for.
+        buf_size = 128 * 1024
+        client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buf_size)
+        client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, buf_size)
+
         if verbosity >= Verbosity.verbose:
             print("Client connected", file=sys.stderr)
 
