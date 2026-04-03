@@ -178,6 +178,8 @@ class Connection:
                     stream.unprocessed_packets.put(packet)
         except (ConnectionClosedError, OSError):
             pass
+        except Exception as e:
+            print(f"Reader thread error: {e}", file=sys.stderr)
         finally:
             if self.running:
                 self.close()
