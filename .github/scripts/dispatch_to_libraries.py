@@ -16,7 +16,7 @@ def get_version() -> str:
 
 def get_protocol_version() -> str:
     text = (ROOT / "src" / "hegel" / "protocol" / "connection.py").read_text()
-    m = re.search(r"^PROTOCOL_VERSION\s*=\s*([\d.]+)", text, re.MULTILINE)
+    m = re.search(r'^PROTOCOL_VERSION\s*=\s*"([\d.]+)"', text, re.MULTILINE)
     assert m is not None
     return m.group(1)
 
