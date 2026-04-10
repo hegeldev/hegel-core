@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-04-10
+
+This patch changes our CBOR tag for text fields from `6` to `91`, to avoid reserving a "Standards Action" tag, even though it is technically unassigned. See https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml.
+
+The protocol version is now `0.10`.
+
 ## 0.3.2 - 2026-04-05
 
 This patch implements a `no_surrogates` parameter for our `TextConformance` conformance test, for languages with UTF-8 strings.
