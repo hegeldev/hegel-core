@@ -19,7 +19,7 @@ from hegel.protocol.utils import SHUTDOWN, ConnectionClosedError, StreamId
 if TYPE_CHECKING:
     from hegel.protocol.stream import Stream
 
-PROTOCOL_VERSION = 0.9
+PROTOCOL_VERSION = "0.10"
 HANDSHAKE_STRING = b"hegel_handshake_start"
 
 

@@ -22,7 +22,7 @@ class BooleansStrategy(SearchStrategy[bool]):
 
 
 # used to allow encoding of surrogate code points. See https://github.com/hegeldev/hegel-core/pull/72
-HEGEL_STRING_TAG = 6
+HEGEL_STRING_TAG = 91
 
 
 def _encode_value(value: object) -> object:

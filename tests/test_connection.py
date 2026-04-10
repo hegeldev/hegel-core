@@ -509,7 +509,7 @@ def test_send_handshake_returns_server_version(socket_pair):
         t.start()
 
         version = client_conn.send_handshake()
-        assert float(version) == PROTOCOL_VERSION
+        assert version == PROTOCOL_VERSION
 
         t.join(timeout=5)
 

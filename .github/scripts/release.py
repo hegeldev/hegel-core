@@ -82,7 +82,7 @@ def _check_protocol_version_bumped(base_ref: str) -> None:
         text=True,
         cwd=ROOT,
     )
-    if not re.search(r"^\+.*PROTOCOL_VERSION\s*=", diff, re.MULTILINE):
+    if not re.search(r'^\+.*PROTOCOL_VERSION\s*=\s*"', diff, re.MULTILINE):
         raise ValueError("Minor releases must bump PROTOCOL_VERSION.")
 
 
