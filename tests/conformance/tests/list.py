@@ -11,7 +11,7 @@ def main():
     metrics_file = os.environ["CONFORMANCE_METRICS_FILE"]
     test_cases = int(os.environ["CONFORMANCE_TEST_CASES"])
 
-    list_kwargs = {"min_size": params["min_size"]}
+    list_kwargs = {"min_size": params["min_size"], "unique": params["unique"]}
     if params["max_size"] is not None:
         list_kwargs["max_size"] = params["max_size"]
 
@@ -23,9 +23,7 @@ def main():
     @given(st.lists(elem_strategy, **list_kwargs))
     def run(value):
         metrics = {
-            "size": len(value),
-            "min_element": min(value) if value else None,
-            "max_element": max(value) if value else None,
+            "elements": value,
         }
         with open(metrics_file, "a") as f:
             f.write(json.dumps(metrics) + "\n")
