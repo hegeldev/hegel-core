@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-04-11
+
+`ListConformance` and `DictConformance` now run twice; once with `{"mode": "basic"}`, and once with `{"mode": "non_basic"}`, indicating the element generators should be basic or non-basic respectively.
+
 ## 0.4.0 - 2026-04-10
 
 This patch changes our CBOR tag for text fields from `6` to `91`, to avoid reserving a "Standards Action" tag, even though it is technically unassigned. See https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml.
