@@ -127,6 +127,7 @@ def _integer_params_strategy(
 
 class ConformanceTest(ABC):
     default_test_cases: int = 50
+    dual_path: bool = False
     registered_tests: ClassVar[set[type["ConformanceTest"]]] = set()
 
     def __init_subclass__(cls) -> None:
@@ -504,6 +505,8 @@ class BinaryConformance(ConformanceTest):
 
 
 class ListConformance(ConformanceTest):
+    dual_path = True
+
     def __init__(
         self,
         binary_path: str | Path,
@@ -603,6 +606,8 @@ class SampledFromConformance(ConformanceTest):
 
 
 class DictConformance(ConformanceTest):
+    dual_path = True
+
     def __init__(
         self,
         binary_path: str | Path,
@@ -705,10 +710,25 @@ def run_conformance_tests(
     }
 
     for test in tests:
-        for mode in ["basic", "non_basic"]:
-            with subtests.test(msg=f"{type(test).__name__}[{mode}]"):
-                # When conformance tests fail, they take ages to shrink and tend to
-                # hit the 5 minute cap. Get ahead of that by disabling shrinking.
+        if test.dual_path:
+            for mode in ["basic", "non_basic"]:
+                with subtests.test(msg=f"{type(test).__name__}[{mode}]"):
+
+                    @Settings(
+                        parent=settings,
+                        max_examples=5,
+                        deadline=None,
+                        phases=set(Phase) - {Phase.shrink},
+                    )
+                    @given(test.params_strategy())
+                    def run_test(params: dict[str, Any], *, _mode: str = mode) -> None:
+                        params["mode"] = _mode
+                        test.run(params)
+
+                    run_test()
+        else:
+            with subtests.test(msg=type(test).__name__):
+
                 @Settings(
                     parent=settings,
                     max_examples=5,
@@ -717,7 +737,6 @@ def run_conformance_tests(
                 )
                 @given(test.params_strategy())
                 def run_test(params: dict[str, Any]) -> None:
-                    params["mode"] = mode
                     test.run(params)
 
                 run_test()
