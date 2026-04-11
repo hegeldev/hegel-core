@@ -127,7 +127,7 @@ def _integer_params_strategy(
 
 class ConformanceTest(ABC):
     default_test_cases: int = 50
-    modes: list[str] | None = None
+    modes: ClassVar[list[str] | None] = None
     registered_tests: ClassVar[set[type["ConformanceTest"]]] = set()
 
     def __init_subclass__(cls) -> None:
@@ -710,7 +710,7 @@ def run_conformance_tests(
     }
 
     for test in tests:
-        for mode in test.modes if test.modes is not None else [None]:
+        for mode in test.modes if test.modes is not None else [None]:  # type: ignore
             suffix = f"[{mode}]" if mode is not None else ""
             with subtests.test(msg=f"{type(test).__name__}{suffix}"):
 
