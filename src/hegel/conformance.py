@@ -532,10 +532,21 @@ class ListConformance(ConformanceTest):
                 else None
             )
 
+            integer_params = draw(_integer_params_strategy(min_value, max_value))
+            unique = draw(st.booleans())
+
+            if unique:
+                lo = integer_params["min_value"]
+                hi = integer_params["max_value"]
+                effective_max_size = max_size if max_size is not None else min_size
+                if lo is not None and hi is not None:
+                    assume(hi - lo + 1 >= effective_max_size)
+
             return {
                 "min_size": min_size,
                 "max_size": max_size,
-                **draw(_integer_params_strategy(min_value, max_value)),
+                "unique": unique,
+                **integer_params,
             }
 
         return strategy()
@@ -552,6 +563,9 @@ class ListConformance(ConformanceTest):
             assert size >= params["min_size"]
             if params["max_size"] is not None:
                 assert size <= params["max_size"]
+
+            if params["unique"]:
+                assert metrics["all_unique"]
 
             if size > 0:
                 if params["min_value"] is not None:
@@ -690,20 +704,22 @@ def run_conformance_tests(
     }
 
     for test in tests:
-        with subtests.test(msg=type(test).__name__):
-            # When conformance tests fail, they take ages to shrink and tend to
-            # hit the 5 minute cap. Get ahead of that by disabling shrinking.
-            @Settings(
-                parent=settings,
-                max_examples=5,
-                deadline=None,
-                phases=set(Phase) - {Phase.shrink},
-            )
-            @given(test.params_strategy())
-            def run_test(params: dict[str, Any]) -> None:
-                test.run(params)
+        for mode in ["basic", "non_basic"]:
+            with subtests.test(msg=f"{type(test).__name__}[{mode}]"):
+                # When conformance tests fail, they take ages to shrink and tend to
+                # hit the 5 minute cap. Get ahead of that by disabling shrinking.
+                @Settings(
+                    parent=settings,
+                    max_examples=5,
+                    deadline=None,
+                    phases=set(Phase) - {Phase.shrink},
+                )
+                @given(test.params_strategy())
+                def run_test(params: dict[str, Any], *, _mode: str = mode) -> None:
+                    params["mode"] = _mode
+                    test.run(params)
 
-            run_test()
+                run_test()
 
     # gives callers visibility into skipped tests in pytest output (and a reminder to
     # implement them).
