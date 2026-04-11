@@ -571,7 +571,7 @@ class ListConformance(ConformanceTest):
                 if params["max_value"] is not None:
                     assert max(elements) <= params["max_value"]
 
-            if params.get("unique"):
+            if params["unique"]:
                 assert len(set(elements)) == size
 
 

@@ -23,10 +23,7 @@ def main():
     @given(st.lists(elem_strategy, **list_kwargs))
     def run(value):
         metrics = {
-            "size": len(value),
-            "all_unique": len(value) == len(set(value)),
-            "min_element": min(value) if value else None,
-            "max_element": max(value) if value else None,
+            "elements": value,
         }
         with open(metrics_file, "a") as f:
             f.write(json.dumps(metrics) + "\n")
