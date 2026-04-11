@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unicodedata
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Collection
+from collections.abc import Collection
 from encodings.aliases import aliases
 from pathlib import Path
 from typing import Any, ClassVar
@@ -127,7 +127,7 @@ def _integer_params_strategy(
 
 class ConformanceTest(ABC):
     default_test_cases: int = 50
-    dual_path: bool = False
+    modes: list[str] | None = None
     registered_tests: ClassVar[set[type["ConformanceTest"]]] = set()
 
     def __init_subclass__(cls) -> None:
@@ -505,7 +505,7 @@ class BinaryConformance(ConformanceTest):
 
 
 class ListConformance(ConformanceTest):
-    dual_path = True
+    modes = ["basic", "non_basic"]
 
     def __init__(
         self,
@@ -606,7 +606,7 @@ class SampledFromConformance(ConformanceTest):
 
 
 class DictConformance(ConformanceTest):
-    dual_path = True
+    modes = ["basic", "non_basic"]
 
     def __init__(
         self,
@@ -710,27 +710,9 @@ def run_conformance_tests(
     }
 
     for test in tests:
-        if test.dual_path:
-            for mode in ["basic", "non_basic"]:
-                with subtests.test(msg=f"{type(test).__name__}[{mode}]"):
-
-                    def make_run_test(bound_mode: str) -> Callable[[], None]:
-                        @Settings(
-                            parent=settings,
-                            max_examples=5,
-                            deadline=None,
-                            phases=set(Phase) - {Phase.shrink},
-                        )
-                        @given(params=test.params_strategy())
-                        def run_test(params: dict[str, Any]) -> None:
-                            params["mode"] = bound_mode
-                            test.run(params)
-
-                        return run_test
-
-                    make_run_test(mode)()
-        else:
-            with subtests.test(msg=type(test).__name__):
+        for mode in test.modes if test.modes is not None else [None]:
+            suffix = f"[{mode}]" if mode is not None else ""
+            with subtests.test(msg=f"{type(test).__name__}{suffix}"):
 
                 @Settings(
                     parent=settings,
@@ -740,6 +722,8 @@ def run_conformance_tests(
                 )
                 @given(test.params_strategy())
                 def run_test(params: dict[str, Any]) -> None:
+                    if mode is not None:
+                        params["mode"] = mode
                     test.run(params)
 
                 run_test()
