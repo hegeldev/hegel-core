@@ -715,8 +715,8 @@ def run_conformance_tests(
                     phases=set(Phase) - {Phase.shrink},
                 )
                 @given(test.params_strategy())
-                def run_test(params: dict[str, Any], *, _mode: str = mode) -> None:
-                    params["mode"] = _mode
+                def run_test(params: dict[str, Any]) -> None:
+                    params["mode"] = mode
                     test.run(params)
 
                 run_test()
