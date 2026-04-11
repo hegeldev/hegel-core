@@ -559,19 +559,20 @@ class ListConformance(ConformanceTest):
         for metrics in metrics_list:
             if currently_in_test_context():
                 note(f"metrics: {metrics}")
-            size = metrics["size"]
+            elements = metrics["elements"]
+            size = len(elements)
             assert size >= params["min_size"]
             if params["max_size"] is not None:
                 assert size <= params["max_size"]
 
-            if params["unique"]:
-                assert metrics["all_unique"]
-
             if size > 0:
                 if params["min_value"] is not None:
-                    assert metrics["min_element"] >= params["min_value"]
+                    assert min(elements) >= params["min_value"]
                 if params["max_value"] is not None:
-                    assert metrics["max_element"] <= params["max_value"]
+                    assert max(elements) <= params["max_value"]
+
+            if params.get("unique"):
+                assert len(set(elements)) == size
 
 
 class SampledFromConformance(ConformanceTest):
