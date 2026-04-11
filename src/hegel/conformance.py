@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unicodedata
 from abc import ABC, abstractmethod
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from encodings.aliases import aliases
 from pathlib import Path
 from typing import Any, ClassVar
@@ -714,18 +714,21 @@ def run_conformance_tests(
             for mode in ["basic", "non_basic"]:
                 with subtests.test(msg=f"{type(test).__name__}[{mode}]"):
 
-                    @Settings(
-                        parent=settings,
-                        max_examples=5,
-                        deadline=None,
-                        phases=set(Phase) - {Phase.shrink},
-                    )
-                    @given(test.params_strategy())
-                    def run_test(params: dict[str, Any], *, _mode: str = mode) -> None:
-                        params["mode"] = _mode
-                        test.run(params)
+                    def make_run_test(bound_mode: str) -> Callable[[], None]:
+                        @Settings(
+                            parent=settings,
+                            max_examples=5,
+                            deadline=None,
+                            phases=set(Phase) - {Phase.shrink},
+                        )
+                        @given(params=test.params_strategy())
+                        def run_test(params: dict[str, Any]) -> None:
+                            params["mode"] = bound_mode
+                            test.run(params)
 
-                    run_test()
+                        return run_test
+
+                    make_run_test(mode)()
         else:
             with subtests.test(msg=type(test).__name__):
 
