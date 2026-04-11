@@ -1,3 +1,3 @@
 RELEASE_TYPE: patch
 
-Add dual-path conformance testing: every conformance test now runs in both "basic" (schema) and "non_basic" (compositional fallback) modes. Add `unique` parameter to list conformance tests.
+`ListConformance` and `DictConformance` now run twice; once with `{"mode": "basic"}`, and once with `{"mode": "non_basic"}`, indicating the element generators should be basic or non-basic respectively.
