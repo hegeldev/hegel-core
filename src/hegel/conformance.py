@@ -505,7 +505,7 @@ class BinaryConformance(ConformanceTest):
 
 
 class ListConformance(ConformanceTest):
-    modes = ["basic", "non_basic"]
+    modes: ClassVar[list[str]] = ["basic", "non_basic"]
 
     def __init__(
         self,
@@ -606,7 +606,7 @@ class SampledFromConformance(ConformanceTest):
 
 
 class DictConformance(ConformanceTest):
-    modes = ["basic", "non_basic"]
+    modes: ClassVar[list[str]] = ["basic", "non_basic"]
 
     def __init__(
         self,
