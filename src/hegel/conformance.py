@@ -152,10 +152,13 @@ class ConformanceTest(ABC):
         self,
         binary_path: str | Path,
         test_cases: int | None = None,
+        *,
+        skip_server_metrics: bool = False,
     ) -> None:
         self.binary = Path(binary_path)
         assert self.binary.exists()
         self.test_cases = test_cases or self.default_test_cases
+        self.skip_server_metrics = skip_server_metrics
 
     @abstractmethod
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
@@ -216,11 +219,19 @@ class ConformanceTest(ABC):
                 server_metrics_list = [
                     json.loads(line) for line in server_metrics_text.split("\n") if line
                 ]
-                if len(server_metrics_list) == len(metrics_list):
-                    for client_m, server_m in zip(
-                        metrics_list, server_metrics_list, strict=True
-                    ):
-                        client_m.update(server_m)
+                assert len(server_metrics_list) == len(metrics_list)
+                for client_m, server_m in zip(
+                    metrics_list, server_metrics_list, strict=True
+                ):
+                    client_m.update(server_m)
+            elif not self.skip_server_metrics:
+                raise RuntimeError(
+                    "Server metrics file is empty. The library binary should "
+                    "start the hegel server, which writes per-test-case "
+                    "generate counts to CONFORMANCE_SERVER_METRICS_FILE. "
+                    "If this binary does not use the hegel server, pass "
+                    "skip_server_metrics=True."
+                )
 
         self.validate(metrics_list, params)
 
@@ -309,8 +320,11 @@ class IntegerConformance(ConformanceTest):
         *,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_value = min_value
         self.max_value = max_value
 
@@ -451,8 +465,11 @@ class TextConformance(ConformanceTest):
         test_cases: int | None = None,
         *,
         no_surrogates: bool = False,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.no_surrogates = no_surrogates
 
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
@@ -544,8 +561,11 @@ class ListConformance(ConformanceTest):
         *,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_value = min_value
         self.max_value = max_value
 
@@ -717,8 +737,11 @@ class DictConformance(ConformanceTest):
         max_key: int | None = None,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_key = min_key if min_key is not None else -1000
         self.max_key = max_key if max_key is not None else 1000
         self.min_value = min_value if min_value is not None else -1000

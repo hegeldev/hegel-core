@@ -32,17 +32,21 @@ TESTS_DIR = Path(__file__).parent / "tests"
 
 
 def test_conformance(subtests):
+    # These binaries use Hypothesis directly, not the hegel server,
+    # so server-side metrics (generate_count) are not available.
+    skip = {"skip_server_metrics": True}
+
     run_conformance_tests(
         [
-            BooleanConformance(TESTS_DIR / "boolean.py"),
-            IntegerConformance(TESTS_DIR / "integer.py"),
-            FloatConformance(TESTS_DIR / "float.py"),
-            TextConformance(TESTS_DIR / "text.py"),
-            BinaryConformance(TESTS_DIR / "binary.py"),
-            ListConformance(TESTS_DIR / "list.py"),
-            SampledFromConformance(TESTS_DIR / "sampled_from.py"),
-            OneOfConformance(TESTS_DIR / "one_of.py"),
-            DictConformance(TESTS_DIR / "dict.py"),
+            BooleanConformance(TESTS_DIR / "boolean.py", **skip),
+            IntegerConformance(TESTS_DIR / "integer.py", **skip),
+            FloatConformance(TESTS_DIR / "float.py", **skip),
+            TextConformance(TESTS_DIR / "text.py", **skip),
+            BinaryConformance(TESTS_DIR / "binary.py", **skip),
+            ListConformance(TESTS_DIR / "list.py", **skip),
+            SampledFromConformance(TESTS_DIR / "sampled_from.py", **skip),
+            OneOfConformance(TESTS_DIR / "one_of.py", **skip),
+            DictConformance(TESTS_DIR / "dict.py", **skip),
         ],
         subtests,
         skip_tests=[

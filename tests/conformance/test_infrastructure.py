@@ -51,8 +51,15 @@ def test_nonexistent_binary():
 
 def test_run_failure(conformance_binary):
     binary_path = conformance_binary("sys.exit(1)")
-    test = BooleanConformance(binary_path)
+    test = BooleanConformance(binary_path, skip_server_metrics=True)
     with pytest.raises(RuntimeError, match="exit code"):
+        test.run({})
+
+
+def test_missing_server_metrics_raises(conformance_binary):
+    binary_path = conformance_binary("mf.write(json.dumps({'value': True}) + '\\n')")
+    test = BooleanConformance(binary_path)
+    with pytest.raises(RuntimeError, match="Server metrics file is empty"):
         test.run({})
 
 
@@ -85,7 +92,7 @@ def test_jsonl_parsing_does_not_split_on_unicode_line_boundaries(
     assert len(s.splitlines()) > 1
 
     binary_path = conformance_binary(f"mf.write({s!r} + '\\n')")
-    conformance = _SingleEntryConformance(binary_path)
+    conformance = _SingleEntryConformance(binary_path, skip_server_metrics=True)
     conformance.run({})
 
 
