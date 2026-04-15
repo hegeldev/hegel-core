@@ -33,7 +33,7 @@ TESTS_DIR = Path(__file__).parent / "tests"
 
 def test_conformance(subtests):
     # These binaries use Hypothesis directly, not the hegel server,
-    # so server-side metrics (generate_count) are not available.
+    # so server-side metrics (generate_call_count) are not available.
     skip = {"skip_server_metrics": True}
 
     run_conformance_tests(

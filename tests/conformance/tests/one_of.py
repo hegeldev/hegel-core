@@ -16,9 +16,9 @@ def main():
     branches = []
     for r in ranges:
         gen = st.integers(min_value=r["min_value"], max_value=r["max_value"])
-        if mode == "transformed":
+        if mode == "map_negate":
             gen = gen.map(lambda x: -x)
-        elif mode == "non_basic":
+        elif mode == "filter_even":
             gen = gen.filter(lambda x: x % 2 == 0)
         branches.append(gen)
 

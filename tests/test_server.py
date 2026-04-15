@@ -740,4 +740,4 @@ def test_server_metrics_file(client, monkeypatch, tmp_path):
     lines = [json.loads(line) for line in metrics_file.read_text().splitlines() if line]
     assert len(lines) >= 5
     for entry in lines:
-        assert entry["generate_count"] == 2
+        assert entry["generate_call_count"] == 2

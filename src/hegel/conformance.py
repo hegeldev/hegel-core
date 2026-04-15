@@ -663,14 +663,14 @@ class OneOfConformance(ConformanceTest):
     the three oneOf implementation paths:
 
     - basic: all branches are basic generators (single combined schema)
-    - transformed: basic generators with negate transform (single combined schema)
-    - non_basic: branches forced non-basic via filter (span protocol)
+    - map_negate: branches mapped through negation (single combined schema)
+    - filter_even: branches filtered to even values only (span protocol)
 
     Validates both correctness (values in expected ranges) and that the
     correct protocol path was used (single schema vs. multiple requests).
     """
 
-    modes: ClassVar[list[str]] = ["basic", "transformed", "non_basic"]
+    modes: ClassVar[list[str]] = ["basic", "map_negate", "filter_even"]
 
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
         @st.composite
@@ -701,19 +701,19 @@ class OneOfConformance(ConformanceTest):
                 note(f"metrics: {metrics}")
             value = metrics["value"]
 
-            if "generate_count" in metrics:
-                if mode in ("basic", "transformed"):
-                    assert metrics["generate_count"] == 1
+            if "generate_call_count" in metrics:
+                if mode in ("basic", "map_negate"):
+                    assert metrics["generate_call_count"] == 1
                 else:
-                    assert metrics["generate_count"] >= 2
+                    assert metrics["generate_call_count"] >= 2
 
-            if mode == "non_basic":
+            if mode == "filter_even":
                 assert value % 2 == 0
 
             matched = False
             for i, r in enumerate(ranges):
                 lo, hi = r["min_value"], r["max_value"]
-                if mode == "transformed":
+                if mode == "map_negate":
                     lo, hi = -hi, -lo
                 if lo <= value <= hi:
                     branches_used.add(i)

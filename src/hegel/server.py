@@ -210,7 +210,7 @@ class HegelState:
                         if server_metrics_file is not None:
                             with open(server_metrics_file, "a") as mf:
                                 mf.write(
-                                    json.dumps({"generate_count": generate_count})
+                                    json.dumps({"generate_call_count": generate_count})
                                     + "\n"
                                 )
                         status = Status[message["status"]]
