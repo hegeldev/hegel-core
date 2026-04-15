@@ -626,9 +626,12 @@ class OneOfConformance(ConformanceTest):
     determine which alternative produced each value. Three modes exercise
     the three oneOf implementation paths:
 
-    - basic: all alternatives are basic generators (Path 1 — single schema)
-    - transformed: basic generators with identity map (Path 2 — tuple schema)
-    - non_basic: alternatives forced non-basic (Path 3 — span protocol)
+    - basic: all alternatives are basic generators (single combined schema)
+    - transformed: basic generators with negate transform (single combined schema)
+    - non_basic: alternatives forced non-basic via filter (span protocol)
+
+    Validates both correctness (values in expected ranges) and that the
+    correct protocol path was used (single schema vs. multiple requests).
     """
 
     modes: ClassVar[list[str]] = ["basic", "transformed", "non_basic"]
@@ -654,15 +657,28 @@ class OneOfConformance(ConformanceTest):
         params: dict[str, Any],
     ) -> None:
         ranges = params["ranges"]
+        mode = params.get("mode", "basic")
         alternatives_used: set[int] = set()
 
         for metrics in metrics_list:
             if currently_in_test_context():
                 note(f"metrics: {metrics}")
             value = metrics["value"]
+
+            if mode in ("basic", "transformed"):
+                assert metrics["generate_count"] == 1
+            else:
+                assert metrics["generate_count"] >= 2
+
+            if mode == "non_basic":
+                assert value % 2 == 0
+
             matched = False
             for i, r in enumerate(ranges):
-                if r["min_value"] <= value <= r["max_value"]:
+                lo, hi = r["min_value"], r["max_value"]
+                if mode == "transformed":
+                    lo, hi = -hi, -lo
+                if lo <= value <= hi:
                     alternatives_used.add(i)
                     matched = True
                     break
