@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 - 2026-04-15
+
+Add `crash_after_handshake` and `crash_after_handshake_with_stderr` test modes. These simulate a server that crashes immediately after completing the protocol handshake, allowing client libraries to test crash detection and error reporting without reimplementing the binary protocol in test scripts.
+
 ## 0.4.1 - 2026-04-11
 
 `ListConformance` and `DictConformance` now run twice; once with `{"mode": "basic"}`, and once with `{"mode": "non_basic"}`, indicating the element generators should be basic or non-basic respectively.
