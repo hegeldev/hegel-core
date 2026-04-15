@@ -13,16 +13,16 @@ def main():
     mode = params.get("mode", "basic")
 
     ranges = params["ranges"]
-    alternatives = []
+    branches = []
     for r in ranges:
         gen = st.integers(min_value=r["min_value"], max_value=r["max_value"])
         if mode == "transformed":
             gen = gen.map(lambda x: -x)
         elif mode == "non_basic":
             gen = gen.filter(lambda x: x % 2 == 0)
-        alternatives.append(gen)
+        branches.append(gen)
 
-    strategy = st.one_of(*alternatives)
+    strategy = st.one_of(*branches)
 
     @settings(max_examples=test_cases, database=None)
     @given(strategy)

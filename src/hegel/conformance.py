@@ -658,13 +658,13 @@ class SampledFromConformance(ConformanceTest):
 class OneOfConformance(ConformanceTest):
     """Conformance test for oneOf (choose between multiple generators).
 
-    Uses non-overlapping integer ranges as alternatives so validation can
-    determine which alternative produced each value. Three modes exercise
+    Uses non-overlapping integer ranges as branches so validation can
+    determine which branch produced each value. Three modes exercise
     the three oneOf implementation paths:
 
-    - basic: all alternatives are basic generators (single combined schema)
+    - basic: all branches are basic generators (single combined schema)
     - transformed: basic generators with negate transform (single combined schema)
-    - non_basic: alternatives forced non-basic via filter (span protocol)
+    - non_basic: branches forced non-basic via filter (span protocol)
 
     Validates both correctness (values in expected ranges) and that the
     correct protocol path was used (single schema vs. multiple requests).
@@ -675,9 +675,9 @@ class OneOfConformance(ConformanceTest):
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
         @st.composite
         def strategy(draw: st.DrawFn) -> dict[str, Any]:
-            n_alternatives = draw(st.integers(2, 5))
+            n_branches = draw(st.integers(2, 5))
             ranges = []
-            for i in range(n_alternatives):
+            for i in range(n_branches):
                 # Ranges spaced 1000 apart so they never overlap
                 base = i * 1000
                 lo = base + draw(st.integers(0, 100))
@@ -694,7 +694,7 @@ class OneOfConformance(ConformanceTest):
     ) -> None:
         ranges = params["ranges"]
         mode = params["mode"]
-        alternatives_used: set[int] = set()
+        branches_used: set[int] = set()
 
         for metrics in metrics_list:
             if currently_in_test_context():
@@ -716,13 +716,13 @@ class OneOfConformance(ConformanceTest):
                 if mode == "transformed":
                     lo, hi = -hi, -lo
                 if lo <= value <= hi:
-                    alternatives_used.add(i)
+                    branches_used.add(i)
                     matched = True
                     break
             assert matched
 
-        # With 50 test cases and 2+ alternatives, both should appear
-        assert len(alternatives_used) >= 2
+        # With 50 test cases and 2+ branches, both should appear
+        assert len(branches_used) >= 2
 
 
 class DictConformance(ConformanceTest):
