@@ -35,6 +35,20 @@ ALL_CATEGORIES = list(charmap.categories())
 ALL_CODECS = sorted({c for c in set(aliases).union(aliases.values()) if _can_encode(c)})
 
 
+# Recommended integer bounds for conformance testing, by language capability.
+# Languages with fixed-width integers should use the appropriate constant.
+# Languages with arbitrary-precision integers MUST use BIGINT bounds to exercise
+# CBOR bignum tag decoding (tags 2 and 3, triggered at values ≥ 2^64).
+# Using narrower bounds hides a class of CBOR decoding bugs where the library
+# silently produces wrong types for large values.
+INT32_MIN = -(2**31)
+INT32_MAX = 2**31 - 1
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
+BIGINT_MIN = -(2**128)
+BIGINT_MAX = 2**128
+
+
 @st.composite
 def _character_params(
     draw: st.DrawFn, *, no_surrogates: bool = False
@@ -603,6 +617,59 @@ class SampledFromConformance(ConformanceTest):
             if currently_in_test_context():
                 note(f"metrics: {metrics}")
             assert metrics["value"] in params["options"]
+
+
+class OneOfConformance(ConformanceTest):
+    """Conformance test for oneOf (choose between multiple generators).
+
+    Uses non-overlapping integer ranges as alternatives so validation can
+    determine which alternative produced each value. Three modes exercise
+    the three oneOf implementation paths:
+
+    - basic: all alternatives are basic generators (Path 1 — single schema)
+    - transformed: basic generators with identity map (Path 2 — tuple schema)
+    - non_basic: alternatives forced non-basic (Path 3 — span protocol)
+    """
+
+    modes: ClassVar[list[str]] = ["basic", "transformed", "non_basic"]
+
+    def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
+        @st.composite
+        def strategy(draw: st.DrawFn) -> dict[str, Any]:
+            n_alternatives = draw(st.integers(2, 5))
+            ranges = []
+            for i in range(n_alternatives):
+                # Ranges spaced 1000 apart so they never overlap
+                base = i * 1000
+                lo = base + draw(st.integers(0, 100))
+                hi = lo + draw(st.integers(1, 100))
+                ranges.append({"min_value": lo, "max_value": hi})
+            return {"ranges": ranges}
+
+        return strategy()
+
+    def validate(
+        self,
+        metrics_list: list[dict[str, Any]],
+        params: dict[str, Any],
+    ) -> None:
+        ranges = params["ranges"]
+        alternatives_used: set[int] = set()
+
+        for metrics in metrics_list:
+            if currently_in_test_context():
+                note(f"metrics: {metrics}")
+            value = metrics["value"]
+            matched = False
+            for i, r in enumerate(ranges):
+                if r["min_value"] <= value <= r["max_value"]:
+                    alternatives_used.add(i)
+                    matched = True
+                    break
+            assert matched
+
+        # With 50 test cases and 2+ alternatives, both should appear
+        assert len(alternatives_used) >= 2
 
 
 class DictConformance(ConformanceTest):
