@@ -830,6 +830,52 @@ class DictConformance(ConformanceTest):
                     assert metrics["max_key"] <= params["max_key"]
 
 
+class OriginDeduplicationConformance(ConformanceTest):
+    """Tests that origin formatting correctly deduplicates failures.
+
+    The origin field in mark_complete is used by the server as a deduplication
+    key. If origin includes too much detail (error messages containing generated
+    values, or full stack traces), the server treats each failure as a distinct
+    bug, breaking shrinking and producing confusing output.
+
+    This test has two modes:
+    - value_in_error_message: the test fails with the generated value in the
+      error message. A correct origin (exc_type + innermost file:line) will
+      deduplicate all failures to 1. An origin that includes the error message
+      will produce many "distinct" failures.
+    - multiple_call_sites: the same buggy function is called from multiple
+      code paths. A correct origin (using the innermost frame) will deduplicate
+      to 1. An origin that includes the full stack trace will produce multiple
+      "distinct" failures.
+    """
+
+    modes: ClassVar[list[str]] = ["value_in_error_message", "multiple_call_sites"]
+
+    def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
+        return st.just({})
+
+    def validate(
+        self,
+        metrics_list: list[dict[str, Any]],
+        params: dict[str, Any],
+    ) -> None:
+        for metrics in metrics_list:
+            interesting = metrics["interesting_test_cases"]
+            mode = params.get("mode", "unknown")
+            assert interesting == 1, (
+                f"Expected exactly 1 distinct failure for mode '{mode}', "
+                f"but got {interesting}. "
+                + (
+                    "This usually means the origin field includes the error message "
+                    "text, which contains the generated value and prevents deduplication."
+                    if mode == "value_in_error_message"
+                    else "This usually means the origin field includes the full stack "
+                    "trace, causing different call paths to the same bug to appear "
+                    "as distinct failures."
+                )
+            )
+
+
 def run_conformance_tests(
     tests: Collection[ConformanceTest],
     subtests: pytest.Subtests,

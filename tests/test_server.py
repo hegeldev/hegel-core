@@ -713,6 +713,110 @@ def test_flaky_test_results(client):
         client.run_test(test, test_cases=20)
 
 
+def test_origin_with_error_message_breaks_dedup(client, monkeypatch):
+    """If origin includes the error message (which contains the generated value),
+    every failure looks distinct. This verifies the server actually treats
+    different origin strings as different bugs."""
+    import tests.client.client as client_mod
+
+    def bad_extract_origin(exc, tb):
+        # BAD: includes str(exc) which contains the generated value
+        return f"{type(exc).__name__}: {exc}"
+
+    monkeypatch.setattr(client_mod, "_extract_origin", bad_extract_origin)
+
+    def test():
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 100}
+        )
+        assert x <= 10, f"Got {x}"
+
+    with pytest.raises((AssertionError, ExceptionGroup)):
+        client.run_test(test, test_cases=100)
+    assert client.last_result["interesting_test_cases"] > 1
+
+
+def test_origin_without_error_message_deduplicates(client):
+    """With correct origin (exc_type + file:line), all failures from the same
+    assertion deduplicate to 1, even when error messages differ."""
+
+    def test():
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 100}
+        )
+        assert x <= 10, f"Got {x}"
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, test_cases=100)
+    assert client.last_result["interesting_test_cases"] == 1
+
+
+def test_origin_with_full_stack_trace_breaks_dedup(client, monkeypatch):
+    """If origin includes the full stack trace, the same bug reached via
+    different call paths appears as multiple distinct bugs."""
+    import traceback as tb_mod
+
+    import tests.client.client as client_mod
+
+    def bad_extract_origin(exc, tb):
+        # BAD: includes the full stack trace
+        if tb is not None:
+            frames = tb_mod.format_tb(tb)
+            return f"{type(exc).__name__}\n{''.join(frames)}"
+        return f"{type(exc).__name__}"
+
+    monkeypatch.setattr(client_mod, "_extract_origin", bad_extract_origin)
+
+    def buggy(x):
+        assert x <= 10
+
+    def path_a(x):
+        buggy(x)
+
+    def path_b(x):
+        buggy(x)
+
+    def test():
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 100}
+        )
+        if x % 2 == 0:
+            path_a(x)
+        else:
+            path_b(x)
+
+    with pytest.raises((AssertionError, ExceptionGroup)):
+        client.run_test(test, test_cases=100)
+    assert client.last_result["interesting_test_cases"] > 1
+
+
+def test_origin_with_innermost_frame_deduplicates_call_sites(client):
+    """With correct origin (innermost frame only), the same bug reached via
+    different call paths deduplicates to 1."""
+
+    def buggy(x):
+        assert x <= 10
+
+    def path_a(x):
+        buggy(x)
+
+    def path_b(x):
+        buggy(x)
+
+    def test():
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 100}
+        )
+        if x % 2 == 0:
+            path_a(x)
+        else:
+            path_b(x)
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, test_cases=100)
+    assert client.last_result["interesting_test_cases"] == 1
+
+
 def test_flaky_message_for_non_strategy_flaky():
     """Test that _flaky_message returns the test result message for
     non-FlakyStrategyDefinition errors like FlakyReplay."""
