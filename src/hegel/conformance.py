@@ -693,7 +693,7 @@ class OneOfConformance(ConformanceTest):
         params: dict[str, Any],
     ) -> None:
         ranges = params["ranges"]
-        mode = params.get("mode", "basic")
+        mode = params["mode"]
         alternatives_used: set[int] = set()
 
         for metrics in metrics_list:
