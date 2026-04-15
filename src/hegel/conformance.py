@@ -35,6 +35,20 @@ ALL_CATEGORIES = list(charmap.categories())
 ALL_CODECS = sorted({c for c in set(aliases).union(aliases.values()) if _can_encode(c)})
 
 
+# Recommended integer bounds for conformance testing, by language capability.
+# Languages with fixed-width integers should use the appropriate constant.
+# Languages with arbitrary-precision integers MUST use BIGINT bounds to exercise
+# CBOR bignum tag decoding (tags 2 and 3, triggered at values ≥ 2^64).
+# Using narrower bounds hides a class of CBOR decoding bugs where the library
+# silently produces wrong types for large values.
+INT32_MIN = -(2**31)
+INT32_MAX = 2**31 - 1
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
+BIGINT_MIN = -(2**128)
+BIGINT_MAX = 2**128
+
+
 @st.composite
 def _character_params(
     draw: st.DrawFn, *, no_surrogates: bool = False
@@ -138,10 +152,13 @@ class ConformanceTest(ABC):
         self,
         binary_path: str | Path,
         test_cases: int | None = None,
+        *,
+        skip_server_metrics: bool = False,
     ) -> None:
         self.binary = Path(binary_path)
         assert self.binary.exists()
         self.test_cases = test_cases or self.default_test_cases
+        self.skip_server_metrics = skip_server_metrics
 
     @abstractmethod
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
@@ -163,8 +180,12 @@ class ConformanceTest(ABC):
 
     def run(self, params: dict[str, Any]) -> None:
         """Run the library binary and validate its output."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+        with (
+            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f,
+            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as sf,
+        ):
             metrics_file = Path(f.name)
+            server_metrics_file = Path(sf.name)
             input_json = json.dumps(params)
 
             result = subprocess.run(
@@ -173,6 +194,7 @@ class ConformanceTest(ABC):
                     **os.environ,
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
                     "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    "CONFORMANCE_SERVER_METRICS_FILE": str(server_metrics_file),
                     **self.extra_env(),
                 },
                 capture_output=True,
@@ -191,6 +213,25 @@ class ConformanceTest(ABC):
                 for line in metrics_file.read_text().split("\n")
                 if line
             ]
+
+            server_metrics_text = server_metrics_file.read_text()
+            if server_metrics_text:
+                server_metrics_list = [
+                    json.loads(line) for line in server_metrics_text.split("\n") if line
+                ]
+                assert len(server_metrics_list) == len(metrics_list)
+                for client_m, server_m in zip(
+                    metrics_list, server_metrics_list, strict=True
+                ):
+                    client_m.update(server_m)
+            elif not self.skip_server_metrics:
+                raise RuntimeError(
+                    "Server metrics file is empty. The library binary should "
+                    "start the hegel server, which writes per-test-case "
+                    "generate counts to CONFORMANCE_SERVER_METRICS_FILE. "
+                    "If this binary does not use the hegel server, pass "
+                    "skip_server_metrics=True."
+                )
 
         self.validate(metrics_list, params)
 
@@ -279,8 +320,11 @@ class IntegerConformance(ConformanceTest):
         *,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_value = min_value
         self.max_value = max_value
 
@@ -421,8 +465,11 @@ class TextConformance(ConformanceTest):
         test_cases: int | None = None,
         *,
         no_surrogates: bool = False,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.no_surrogates = no_surrogates
 
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
@@ -514,8 +561,11 @@ class ListConformance(ConformanceTest):
         *,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_value = min_value
         self.max_value = max_value
 
@@ -605,6 +655,76 @@ class SampledFromConformance(ConformanceTest):
             assert metrics["value"] in params["options"]
 
 
+class OneOfConformance(ConformanceTest):
+    """Conformance test for oneOf (choose between multiple generators).
+
+    Uses non-overlapping integer ranges as branches so validation can
+    determine which branch produced each value. Three modes exercise
+    the three oneOf implementation paths:
+
+    - basic: all branches are basic generators (single combined schema)
+    - map_negate: branches mapped through negation (single combined schema)
+    - filter_even: branches filtered to even values only (span protocol)
+
+    Validates both correctness (values in expected ranges) and that the
+    correct protocol path was used (single schema vs. multiple requests).
+    """
+
+    modes: ClassVar[list[str]] = ["basic", "map_negate", "filter_even"]
+
+    def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
+        @st.composite
+        def strategy(draw: st.DrawFn) -> dict[str, Any]:
+            n_branches = draw(st.integers(2, 5))
+            ranges = []
+            for i in range(n_branches):
+                # Ranges spaced 1000 apart so they never overlap
+                base = i * 1000
+                lo = base + draw(st.integers(0, 100))
+                hi = lo + draw(st.integers(1, 100))
+                ranges.append({"min_value": lo, "max_value": hi})
+            return {"ranges": ranges}
+
+        return strategy()
+
+    def validate(
+        self,
+        metrics_list: list[dict[str, Any]],
+        params: dict[str, Any],
+    ) -> None:
+        ranges = params["ranges"]
+        mode = params["mode"]
+        branches_used: set[int] = set()
+
+        for metrics in metrics_list:
+            if currently_in_test_context():
+                note(f"metrics: {metrics}")
+            value = metrics["value"]
+
+            if "generate_call_count" in metrics:
+                if mode in ("basic", "map_negate"):
+                    assert metrics["generate_call_count"] == 1
+                else:
+                    assert metrics["generate_call_count"] >= 2
+
+            if mode == "filter_even":
+                assert value % 2 == 0
+
+            matched = False
+            for i, r in enumerate(ranges):
+                lo, hi = r["min_value"], r["max_value"]
+                if mode == "map_negate":
+                    lo, hi = -hi, -lo
+                if lo <= value <= hi:
+                    branches_used.add(i)
+                    matched = True
+                    break
+            assert matched
+
+        # With 50 test cases and 2+ branches, both should appear
+        assert len(branches_used) >= 2
+
+
 class DictConformance(ConformanceTest):
     modes: ClassVar[list[str]] = ["basic", "non_basic"]
 
@@ -617,8 +737,11 @@ class DictConformance(ConformanceTest):
         max_key: int | None = None,
         min_value: int | None = None,
         max_value: int | None = None,
+        skip_server_metrics: bool = False,
     ) -> None:
-        super().__init__(binary_path, test_cases)
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
         self.min_key = min_key if min_key is not None else -1000
         self.max_key = max_key if max_key is not None else 1000
         self.min_value = min_value if min_value is not None else -1000

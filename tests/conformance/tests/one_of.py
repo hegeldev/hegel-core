@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+from hypothesis import given, settings, strategies as st
+
+
+def main():
+    params = json.loads(sys.argv[1])
+    metrics_file = os.environ["CONFORMANCE_METRICS_FILE"]
+    test_cases = int(os.environ["CONFORMANCE_TEST_CASES"])
+    mode = params.get("mode", "basic")
+
+    ranges = params["ranges"]
+    branches = []
+    for r in ranges:
+        gen = st.integers(min_value=r["min_value"], max_value=r["max_value"])
+        if mode == "map_negate":
+            gen = gen.map(lambda x: -x)
+        elif mode == "filter_even":
+            gen = gen.filter(lambda x: x % 2 == 0)
+        branches.append(gen)
+
+    strategy = st.one_of(*branches)
+
+    @settings(max_examples=test_cases, database=None)
+    @given(strategy)
+    def run(value):
+        with open(metrics_file, "a") as f:
+            f.write(json.dumps({"value": value}) + "\n")
+
+    run()
+
+
+if __name__ == "__main__":
+    main()
