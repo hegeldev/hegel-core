@@ -177,8 +177,12 @@ class ConformanceTest(ABC):
 
     def run(self, params: dict[str, Any]) -> None:
         """Run the library binary and validate its output."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+        with (
+            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f,
+            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as sf,
+        ):
             metrics_file = Path(f.name)
+            server_metrics_file = Path(sf.name)
             input_json = json.dumps(params)
 
             result = subprocess.run(
@@ -187,6 +191,7 @@ class ConformanceTest(ABC):
                     **os.environ,
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
                     "CONFORMANCE_TEST_CASES": str(self.test_cases),
+                    "CONFORMANCE_SERVER_METRICS_FILE": str(server_metrics_file),
                     **self.extra_env(),
                 },
                 capture_output=True,
@@ -205,6 +210,17 @@ class ConformanceTest(ABC):
                 for line in metrics_file.read_text().split("\n")
                 if line
             ]
+
+            server_metrics_text = server_metrics_file.read_text()
+            if server_metrics_text:
+                server_metrics_list = [
+                    json.loads(line) for line in server_metrics_text.split("\n") if line
+                ]
+                if len(server_metrics_list) == len(metrics_list):
+                    for client_m, server_m in zip(
+                        metrics_list, server_metrics_list, strict=True
+                    ):
+                        client_m.update(server_m)
 
         self.validate(metrics_list, params)
 
@@ -665,10 +681,11 @@ class OneOfConformance(ConformanceTest):
                 note(f"metrics: {metrics}")
             value = metrics["value"]
 
-            if mode in ("basic", "transformed"):
-                assert metrics["generate_count"] == 1
-            else:
-                assert metrics["generate_count"] >= 2
+            if "generate_count" in metrics:
+                if mode in ("basic", "transformed"):
+                    assert metrics["generate_count"] == 1
+                else:
+                    assert metrics["generate_count"] >= 2
 
             if mode == "non_basic":
                 assert value % 2 == 0

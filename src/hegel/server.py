@@ -1,5 +1,6 @@
 import contextlib
 import itertools
+import json
 import os
 import random
 import traceback
@@ -163,6 +164,7 @@ class HegelState:
         collections: dict[int, many] = {}
         variable_pools: list[Variables] = []
         collection_id_counter = itertools.count()
+        generate_count = 0
 
         with BuildContext(data, is_final=self._is_final, wrapped_test=None):  # type: ignore
             test_case_stream = self._connection.new_stream(role="Test Case")
@@ -177,11 +179,12 @@ class HegelState:
             done = False
 
             def handle_client_request(message: dict) -> Any:
-                nonlocal done
+                nonlocal done, generate_count
                 try:
                     command = message["command"]
 
                     if command == "generate":
+                        generate_count += 1
                         schema = message["schema"]
                         strategy = from_schema(schema)
                         result = data.draw(strategy)
@@ -201,6 +204,15 @@ class HegelState:
                         return None
                     elif command == "mark_complete":
                         done = True
+                        server_metrics_file = os.environ.get(
+                            "CONFORMANCE_SERVER_METRICS_FILE"
+                        )
+                        if server_metrics_file is not None:
+                            with open(server_metrics_file, "a") as mf:
+                                mf.write(
+                                    json.dumps({"generate_count": generate_count})
+                                    + "\n"
+                                )
                         status = Status[message["status"]]
                         origin = message.get("origin")
                         if status is Status.VALID:

@@ -721,3 +721,23 @@ def test_flaky_message_for_non_strategy_flaky():
     from hegel.server import FLAKY_TEST_RESULT_MSG, _flaky_message
 
     assert _flaky_message(FlakyReplay("test")) == FLAKY_TEST_RESULT_MSG
+
+
+def test_server_metrics_file(client, monkeypatch, tmp_path):
+    """Tests that the server writes per-test-case generate counts when
+    CONFORMANCE_SERVER_METRICS_FILE is set."""
+    import json
+
+    metrics_file = tmp_path / "server_metrics.jsonl"
+    monkeypatch.setenv("CONFORMANCE_SERVER_METRICS_FILE", str(metrics_file))
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        generate_from_schema({"type": "boolean"})
+
+    client.run_test(test, test_cases=5)
+
+    lines = [json.loads(line) for line in metrics_file.read_text().splitlines() if line]
+    assert len(lines) >= 5
+    for entry in lines:
+        assert entry["generate_count"] == 2
