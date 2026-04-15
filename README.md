@@ -9,5 +9,6 @@
 
 * [Website](https://hegel.dev)
 * [hegel-rust](https://github.com/hegeldev/hegel-rust)
+* [hegel-go](https://github.com/hegeldev/hegel-go)
 
 The Hegel protocol and server, built on [Hypothesis](https://github.com/hypothesisworks/hypothesis).  `hegel-core` provides the core functionality of a property-based testing library, including data generation and shrinking.
