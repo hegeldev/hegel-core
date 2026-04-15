@@ -393,6 +393,50 @@ class TestStopTestOnNewCollection:
         server_thread.join(timeout=2.0)
 
 
+class TestCrashAfterHandshake:
+    def test_crash_after_handshake(self):
+        """Server completes handshake then exits with code 1."""
+        s1, s2 = _create_socket_pair()
+        exit_codes = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "crash_after_handshake")
+            except SystemExit as e:
+                exit_codes.append(e.code)
+
+        server_thread = Thread(target=run, daemon=True)
+        server_thread.start()
+
+        with _setup_client(s2):
+            pass  # Handshake succeeds; server exits immediately after
+
+        server_thread.join(timeout=2.0)
+        assert exit_codes == [1]
+
+    def test_crash_after_handshake_with_stderr(self, capsys):
+        """Server writes error to stderr then exits with code 1."""
+        s1, s2 = _create_socket_pair()
+        exit_codes = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "crash_after_handshake_with_stderr")
+            except SystemExit as e:
+                exit_codes.append(e.code)
+
+        server_thread = Thread(target=run, daemon=True)
+        server_thread.start()
+
+        with _setup_client(s2):
+            pass
+
+        server_thread.join(timeout=2.0)
+        assert exit_codes == [1]
+
+
 class TestTestServerErrors:
     def test_unknown_mode_raises(self):
         s1, s2 = _create_socket_pair()

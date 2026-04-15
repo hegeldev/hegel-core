@@ -87,7 +87,7 @@ Key insight: `map()` on a basic generator preserves the schema by composing the 
 
 - `HEGEL_PROTOCOL_DEBUG=1` - Enables protocol packet tracing (set via `--verbosity debug` CLI flag)
 - `HEGEL_STREAM_TIMEOUT` - Overrides the default 30-second stream timeout
-- `HEGEL_PROTOCOL_TEST_MODE` - Activates the test server for error simulation (modes: `stop_test_on_generate`, `stop_test_on_mark_complete`, `error_response`, `empty_test`, etc.)
+- `HEGEL_PROTOCOL_TEST_MODE` - Activates the test server for error simulation (modes: `crash_after_handshake`, `crash_after_handshake_with_stderr`, `stop_test_on_generate`, `stop_test_on_mark_complete`, `error_response`, `empty_test`, etc.)
 - `ANTITHESIS_OUTPUT_DIR` - When set, switches Hypothesis backend to `hypothesis-urandom`
 
 ### Library Specification

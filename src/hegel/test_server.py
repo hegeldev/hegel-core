@@ -6,6 +6,8 @@ instead of the full ConjectureRunner-based server. Each mode injects a
 specific error condition to validate that clients handle errors correctly.
 
 Modes:
+- crash_after_handshake: Exit immediately after handshake (simulates server crash)
+- crash_after_handshake_with_stderr: Write error to stderr then crash after handshake
 - stop_test_on_generate: StopTest error on first generate of 2nd test case
 - stop_test_on_mark_complete: StopTest error on mark_complete
 - stop_test_on_collection_more: StopTest error on first collection_more
@@ -14,16 +16,36 @@ Modes:
 - empty_test: Immediately sends test_done with no test cases
 """
 
+import sys
 import time
 
 import cbor2
 
 from hegel.protocol import Connection, MessageId, Stream
 
+# Modes that exit immediately after handshake, before processing run_test.
+_CRASH_MODES = {
+    "crash_after_handshake",
+    "crash_after_handshake_with_stderr",
+}
+
 
 def run_test_server(connection: Connection, mode: str) -> None:
     """Run a test server in the specified error simulation mode."""
     connection.receive_handshake()
+
+    # Crash modes exit immediately after handshake, before processing run_test.
+    if mode in _CRASH_MODES:
+        try:
+            if mode == "crash_after_handshake_with_stderr":
+                print(
+                    "FakeServerError: intentional crash for testing",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            sys.exit(1)
+        finally:
+            connection.close()
 
     modes = {
         "stop_test_on_generate": _mode_stop_test_on_generate,
