@@ -726,9 +726,7 @@ def test_origin_with_error_message_breaks_dedup(client, monkeypatch):
     monkeypatch.setattr(client_mod, "_extract_origin", bad_extract_origin)
 
     def test():
-        x = generate_from_schema(
-            {"type": "integer", "min_value": 0, "max_value": 100}
-        )
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
         assert x <= 10, f"Got {x}"
 
     with pytest.raises((AssertionError, ExceptionGroup)):
@@ -741,9 +739,7 @@ def test_origin_without_error_message_deduplicates(client):
     assertion deduplicate to 1, even when error messages differ."""
 
     def test():
-        x = generate_from_schema(
-            {"type": "integer", "min_value": 0, "max_value": 100}
-        )
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
         assert x <= 10, f"Got {x}"
 
     with pytest.raises(AssertionError):
@@ -777,9 +773,7 @@ def test_origin_with_full_stack_trace_breaks_dedup(client, monkeypatch):
         buggy(x)
 
     def test():
-        x = generate_from_schema(
-            {"type": "integer", "min_value": 0, "max_value": 100}
-        )
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
         if x % 2 == 0:
             path_a(x)
         else:
@@ -804,9 +798,7 @@ def test_origin_with_innermost_frame_deduplicates_call_sites(client):
         buggy(x)
 
     def test():
-        x = generate_from_schema(
-            {"type": "integer", "min_value": 0, "max_value": 100}
-        )
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
         if x % 2 == 0:
             path_a(x)
         else:
