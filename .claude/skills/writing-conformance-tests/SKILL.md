@@ -105,11 +105,15 @@ In `tests/conformance/tests/my_test.py`:
 
 ```python
 #!/usr/bin/env python3
-import json, os, sys
+import json
+import os
+import sys
+
 from hypothesis import given, settings, strategies as st
 
+
 def main():
-    params = json.loads(sys.argv[1])
+    json.loads(sys.argv[1])
     metrics_file = os.environ["CONFORMANCE_METRICS_FILE"]
     test_cases = int(os.environ["CONFORMANCE_TEST_CASES"])
 
@@ -120,6 +124,7 @@ def main():
             f.write(json.dumps({"value": value}) + "\n")
 
     run()
+
 
 if __name__ == "__main__":
     main()
