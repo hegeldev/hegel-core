@@ -841,3 +841,66 @@ def test_server_metrics_file(client, monkeypatch, tmp_path):
     assert len(lines) >= 5
     for entry in lines:
         assert entry["generate_call_count"] == 2
+
+
+def test_server_run_metrics_passing(client, monkeypatch, tmp_path):
+    """Tests that the server writes interesting_test_cases=0 to the run
+    metrics file when all test cases pass."""
+    import json
+
+    run_metrics_file = tmp_path / "run_metrics.json"
+    monkeypatch.setenv("CONFORMANCE_SERVER_RUN_METRICS_FILE", str(run_metrics_file))
+
+    def test():
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        assert x >= 0
+
+    client.run_test(test, test_cases=10)
+
+    result = json.loads(run_metrics_file.read_text())
+    assert result["interesting_test_cases"] == 0
+
+
+def test_server_run_metrics_single_failure(client, monkeypatch, tmp_path):
+    """Tests that the server writes interesting_test_cases=1 when all failures
+    share the same origin (correct deduplication)."""
+    import json
+
+    run_metrics_file = tmp_path / "run_metrics.json"
+    monkeypatch.setenv("CONFORMANCE_SERVER_RUN_METRICS_FILE", str(run_metrics_file))
+
+    def test():
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        assert x <= 10, f"Got {x}"
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, test_cases=100)
+
+    result = json.loads(run_metrics_file.read_text())
+    assert result["interesting_test_cases"] == 1
+
+
+def test_server_run_metrics_multiple_failures(client, monkeypatch, tmp_path):
+    """Tests that the server reports multiple distinct failures when origins
+    include the error message (breaking deduplication)."""
+    import json
+
+    import tests.client.client as client_mod
+
+    run_metrics_file = tmp_path / "run_metrics.json"
+    monkeypatch.setenv("CONFORMANCE_SERVER_RUN_METRICS_FILE", str(run_metrics_file))
+
+    def bad_extract_origin(exc, tb):
+        return f"{type(exc).__name__}: {exc}"
+
+    monkeypatch.setattr(client_mod, "_extract_origin", bad_extract_origin)
+
+    def test():
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        assert x <= 10, f"Got {x}"
+
+    with pytest.raises((AssertionError, ExceptionGroup)):
+        client.run_test(test, test_cases=100)
+
+    result = json.loads(run_metrics_file.read_text())
+    assert result["interesting_test_cases"] > 1

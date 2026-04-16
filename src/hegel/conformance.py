@@ -189,11 +189,16 @@ class ConformanceTest(ABC):
         sf = tempfile.NamedTemporaryFile(
             mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
         )
+        rf = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
         try:
             metrics_file = Path(f.name)
             server_metrics_file = Path(sf.name)
+            run_metrics_file = Path(rf.name)
             f.close()
             sf.close()
+            rf.close()
             input_json = json.dumps(params)
 
             result = subprocess.run(
@@ -203,6 +208,7 @@ class ConformanceTest(ABC):
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
                     "CONFORMANCE_TEST_CASES": str(self.test_cases),
                     "CONFORMANCE_SERVER_METRICS_FILE": str(server_metrics_file),
+                    "CONFORMANCE_SERVER_RUN_METRICS_FILE": str(run_metrics_file),
                     **self.extra_env(),
                 },
                 capture_output=True,
@@ -241,9 +247,15 @@ class ConformanceTest(ABC):
                     "If this binary does not use the hegel server, pass "
                     "skip_server_metrics=True."
                 )
+
+            run_metrics_text = run_metrics_file.read_text(encoding="utf-8").strip()
+            self.run_metrics: dict[str, Any] = (
+                json.loads(run_metrics_text) if run_metrics_text else {}
+            )
         finally:
             metrics_file.unlink(missing_ok=True)
             server_metrics_file.unlink(missing_ok=True)
+            run_metrics_file.unlink(missing_ok=True)
 
         self.validate(metrics_list, params)
 
@@ -859,21 +871,20 @@ class OriginDeduplicationConformance(ConformanceTest):
         metrics_list: list[dict[str, Any]],
         params: dict[str, Any],
     ) -> None:
-        for metrics in metrics_list:
-            interesting = metrics["interesting_test_cases"]
-            mode = params.get("mode", "unknown")
-            assert interesting == 1, (
-                f"Expected exactly 1 distinct failure for mode '{mode}', "
-                f"but got {interesting}. "
-                + (
-                    "This usually means the origin field includes the error message "
-                    "text, which contains the generated value and prevents deduplication."
-                    if mode == "value_in_error_message"
-                    else "This usually means the origin field includes the full stack "
-                    "trace, causing different call paths to the same bug to appear "
-                    "as distinct failures."
-                )
+        interesting = self.run_metrics["interesting_test_cases"]
+        mode = params.get("mode", "unknown")
+        assert interesting == 1, (
+            f"Expected exactly 1 distinct failure for mode '{mode}', "
+            f"but got {interesting}. "
+            + (
+                "This usually means the origin field includes the error message "
+                "text, which contains the generated value and prevents deduplication."
+                if mode == "value_in_error_message"
+                else "This usually means the origin field includes the full stack "
+                "trace, causing different call paths to the same bug to appear "
+                "as distinct failures."
             )
+        )
 
 
 def run_conformance_tests(
