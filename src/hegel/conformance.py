@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from abc import ABC, abstractmethod
@@ -189,7 +190,7 @@ class ConformanceTest(ABC):
             input_json = json.dumps(params)
 
             result = subprocess.run(
-                [str(self.binary), input_json],
+                [sys.executable, str(self.binary), input_json],
                 env={
                     **os.environ,
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),

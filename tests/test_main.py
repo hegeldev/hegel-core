@@ -84,12 +84,14 @@ def test_version():
     assert result.output.strip() == f"hegel (version {version})"
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets not available")
 @pytest.mark.parametrize("verbosity", ["normal", "verbose", "debug"])
 def test_cli(socket_path, verbosity):
     with _client_and_server(socket_path, "--verbosity", verbosity) as client:
         client.run_test(lambda: None, test_cases=1)
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets not available")
 def test_cli_cleans_up_stale_socket(socket_path):
     socket_path.touch()
 
@@ -97,6 +99,7 @@ def test_cli_cleans_up_stale_socket(socket_path):
         client.run_test(lambda: None, test_cases=1)
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets not available")
 def test_run_server_with_test_mode(socket_path):
     with _client_and_server(
         socket_path, env={"HEGEL_PROTOCOL_TEST_MODE": "empty_test"}

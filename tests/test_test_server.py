@@ -12,8 +12,7 @@ from tests.client import ClientConnection
 
 def _create_socket_pair():
     """Create a connected pair of sockets."""
-    s1, s2 = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-    return s1, s2
+    return socket.socketpair()
 
 
 def _start_server(server_sock, mode):
