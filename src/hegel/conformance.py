@@ -196,6 +196,8 @@ class ConformanceTest(ABC):
                 [sys.executable, str(self.binary), input_json],
                 env={
                     **os.environ,
+                    # Ensure UTF-8 encoding on Windows (default is cp1252)
+                    "PYTHONUTF8": "1",
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
                     "CONFORMANCE_TEST_CASES": str(self.test_cases),
                     "CONFORMANCE_SERVER_METRICS_FILE": str(server_metrics_file),
