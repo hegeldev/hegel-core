@@ -872,7 +872,7 @@ class OriginDeduplicationConformance(ConformanceTest):
         params: dict[str, Any],
     ) -> None:
         interesting = self.run_metrics["interesting_test_cases"]
-        mode = params.get("mode", "unknown")
+        mode = params["mode"]
         assert interesting == 1, (
             f"Expected exactly 1 distinct failure for mode '{mode}', "
             f"but got {interesting}. "
