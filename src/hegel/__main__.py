@@ -32,8 +32,15 @@ class StdioTransport:
         return data
 
     def sendall(self, data):
-        self._writer.write(data)
-        self._writer.flush()
+        try:
+            self._writer.write(data)
+            self._writer.flush()
+        except ValueError as e:
+            # `write`/`flush` on a closed BufferedWriter raise ValueError
+            # ("I/O operation on closed file"). Translate to BrokenPipeError so
+            # callers can treat stdio disconnection the same as a closed
+            # socket.
+            raise BrokenPipeError(str(e)) from e
 
     def settimeout(self, timeout):
         pass  # No timeout support for stdio

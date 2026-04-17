@@ -488,6 +488,10 @@ def _run_test(
                 final_state.test_function(ConjectureData.for_choices(choices))
 
         return result
+    except (ConnectionError, ProtocolError):
+        # The client has gone away — there's no point trying to deliver a
+        # result, and it's not a server bug that warrants a loud traceback.
+        raise
     except Exception:
         # We don't actually await the futures and just sortof run them fire and
         # forget in the background, so we won't see any exceptions that are

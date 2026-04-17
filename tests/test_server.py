@@ -723,6 +723,126 @@ def test_flaky_message_for_non_strategy_flaky():
     assert _flaky_message(FlakyReplay("test")) == FLAKY_TEST_RESULT_MSG
 
 
+def test_server_does_not_crash_when_writer_closed_during_flaky(monkeypatch, capfd):
+    """Regression test for hegel-rust#191.
+
+    Exercises the race where a FlakyStrategyDefinition is raised while
+    the connection has already been torn down (e.g. the stdio reader
+    thread noticed EOF and closed the transport). Before the fix the
+    server's attempt to send test_done would hit a ValueError from the
+    closed writer, which was not caught and would propagate out of the
+    main loop as an uncaught exception with a noisy traceback.
+    """
+    import contextlib
+
+    import cbor2
+    from hypothesis.errors import FlakyStrategyDefinition as FSD
+
+    import hegel.server
+
+    # Make the third generate raise FSD, matching the shape of the real
+    # failure in hegel-rust's CI.
+    call_count = [0]
+    original_from_schema = hegel.server.from_schema
+
+    def raising_from_schema(schema):
+        call_count[0] += 1
+        strategy = original_from_schema(schema)
+        if call_count[0] == 3:
+
+            class FlakyStrat(st.SearchStrategy):
+                def do_draw(self, data):
+                    raise FSD(
+                        "Inconsistent data generation! "
+                        "Data generation behaved differently between runs."
+                    )
+
+            return FlakyStrat()
+        return strategy
+
+    monkeypatch.setattr("hegel.server.from_schema", raising_from_schema)
+
+    # When the server tries to deliver test_done, pretend the underlying
+    # transport has already been torn down — BrokenPipeError is what a real
+    # closed socket / stdio transport raises once our transport layer has
+    # normalised the error.
+    original_write_packet = Connection.write_packet
+
+    def failing_write_packet(self, packet):
+        if packet.payload:
+            try:
+                payload = cbor2.loads(packet.payload)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and payload.get("event") == "test_done":
+                raise BrokenPipeError("broken pipe")
+        return original_write_packet(self, packet)
+
+    monkeypatch.setattr(Connection, "write_packet", failing_write_packet)
+
+    server_socket, client_socket = socket.socketpair()
+    server_exception: list[BaseException] = []
+
+    def run_server():
+        try:
+            run_server_on_connection(Connection(server_socket, name="Server"))
+        except BaseException as e:
+            server_exception.append(e)
+
+    server_thread = Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    client_conn = ClientConnection(client_socket)
+    client = Client(client_conn)
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    # The client will never receive test_done (since the patched write_packet
+    # drops it), so we run it on a thread with a short timeout and then drop
+    # the connection — mirroring a client process that has crashed or exited.
+    def run_client():
+        with contextlib.suppress(Exception):
+            client.run_test(test, test_cases=10)
+
+    client_thread = Thread(target=run_client, daemon=True)
+    client_thread.start()
+    client_thread.join(timeout=3)
+
+    client_conn.close()
+    with contextlib.suppress(OSError):
+        client_socket.shutdown(socket.SHUT_RDWR)
+    with contextlib.suppress(OSError):
+        client_socket.close()
+
+    server_thread.join(timeout=5)
+    assert not server_thread.is_alive()
+
+    assert server_exception == []
+    captured = capfd.readouterr()
+    assert "Traceback" not in captured.err
+    assert "broken pipe" not in captured.err
+
+
+def test_stdio_transport_translates_closed_writer_to_broken_pipe():
+    """Writes to a closed stdio writer raise ValueError, but the rest of the
+    server treats disconnection as (ConnectionError, ProtocolError). The
+    transport normalises that to BrokenPipeError so it flows through the
+    existing connection-error handling.
+    """
+    import io
+
+    from hegel.__main__ import StdioTransport
+
+    reader = io.BytesIO(b"")
+    writer = io.BytesIO()
+    transport = StdioTransport(reader, writer)
+    writer.close()
+
+    with pytest.raises(BrokenPipeError):
+        transport.sendall(b"some data")
+
+
 def test_server_metrics_file(client, monkeypatch, tmp_path):
     """Tests that the server writes per-test-case generate counts when
     CONFORMANCE_SERVER_METRICS_FILE is set."""
