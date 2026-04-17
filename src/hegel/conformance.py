@@ -181,12 +181,15 @@ class ConformanceTest(ABC):
 
     def run(self, params: dict[str, Any]) -> None:
         """Run the library binary and validate its output."""
-        with (
-            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f,
-            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as sf,
-        ):
+        # Use delete=False because on Windows, NamedTemporaryFile holds an
+        # exclusive lock that prevents the subprocess from opening the file.
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        sf = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        try:
             metrics_file = Path(f.name)
             server_metrics_file = Path(sf.name)
+            f.close()
+            sf.close()
             input_json = json.dumps(params)
 
             result = subprocess.run(
@@ -233,6 +236,9 @@ class ConformanceTest(ABC):
                     "If this binary does not use the hegel server, pass "
                     "skip_server_metrics=True."
                 )
+        finally:
+            metrics_file.unlink(missing_ok=True)
+            server_metrics_file.unlink(missing_ok=True)
 
         self.validate(metrics_list, params)
 
