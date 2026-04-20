@@ -453,6 +453,9 @@ def _run_test(
                 is_interesting = data.status is Status.INTERESTING
                 is_valid = data.status is Status.VALID
                 is_invalid = data.status is Status.INVALID
+                # No failure_blobs: one-shot blobs can't be replayed (the server
+                # rejects one_shot + failure_blob), so reporting them would be
+                # misleading.
                 result = {
                     "passed": not is_interesting,
                     "test_cases": 1,
@@ -460,9 +463,7 @@ def _run_test(
                     "invalid_test_cases": int(is_invalid),
                     "interesting_test_cases": int(is_interesting),
                     "seed": str(seed),
-                    "failure_blobs": (
-                        [encode_failure(data.choices)] if is_interesting else []
-                    ),
+                    "failure_blobs": [],
                 }
                 stream.send_request({"event": "test_done", "results": result}).get()
                 return result

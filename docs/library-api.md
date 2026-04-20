@@ -654,7 +654,9 @@ immediately should set `one_shot: true`.
 
 `one_shot` cannot be combined with `failure_blob`: the internal entropy budget
 used by a one-shot run is different from the one used for normal runs, so
-failure blobs produced by the two modes are not interchangeable.
+failure blobs produced by the two modes are not interchangeable. For the same
+reason, the `test_done` event from a one-shot run always reports an empty
+`failure_blobs` list even when the test fails — the blob could not be replayed.
 
 ## Error Handling
 
