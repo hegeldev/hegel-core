@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5 - 2026-04-20
+
+This release adds a new conformance test `OriginDeduplicationConformance`.
+
 ## 0.4.4 - 2026-04-20
 
 This release is in support of getting hegel libraries working on Windows. It mostly fixes issues affecting the conformance testing.
