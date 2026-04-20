@@ -62,6 +62,7 @@ class Client:
         database_key: bytes | None = None,
         derandomize: bool = False,
         database: str | None | UniqueIdentifier = not_set,
+        one_shot: bool = False,
     ) -> None:
         """Run a property test."""
 
@@ -75,6 +76,7 @@ class Client:
             "database_key": database_key,
             "derandomize": derandomize,
             "failure_blob": failure_blob,
+            "one_shot": one_shot,
         }
         if database is not not_set:
             message["database"] = database
@@ -93,9 +95,10 @@ class Client:
 
             if event == "test_case":
                 stream_id = message["stream_id"]
+                is_final = message.get("is_final", False)
                 test_stream.write_reply(packet.message_id, None)
                 test_case_stream = self.connection.connect_stream(stream_id)
-                self._run_test_case(test_case_stream, test_fn, is_final=False)
+                self._run_test_case(test_case_stream, test_fn, is_final=is_final)
             elif event == "test_done":
                 test_stream.write_reply(packet.message_id, True)
                 result_data = message["results"]

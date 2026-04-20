@@ -20,7 +20,7 @@ from hypothesis.errors import (
     StopTest,
     UnsatisfiedAssumption,
 )
-from hypothesis.internal.conjecture.data import ConjectureData, Status
+from hypothesis.internal.conjecture.data import ConjectureData, DataObserver, Status
 from hypothesis.internal.conjecture.engine import ConjectureRunner, ExitReason
 from hypothesis.internal.conjecture.shrinker import sort_key
 from hypothesis.internal.conjecture.utils import calc_label_from_name, many
@@ -327,6 +327,7 @@ def run_server_on_connection(connection: Connection) -> None:
                             ),
                             derandomize=message.get("derandomize", False),
                             database=message.get("database", not_set),
+                            one_shot=message.get("one_shot", False),
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
@@ -357,6 +358,7 @@ def _run_test(
     suppress_health_check: list[str] | None,
     derandomize: bool,
     database: str | UniqueIdentifier | None,
+    one_shot: bool = False,
 ) -> dict[str, Any]:
     """Run a single test using ConjectureRunner.
 
@@ -416,7 +418,7 @@ def _run_test(
             **({} if database is not_set else {"database": database}),
         }
 
-        state = HegelState(connection, stream, is_final=False)
+        state = HegelState(connection, stream, is_final=one_shot)
         runner = ConjectureRunner(
             state.test_function,
             settings=settings(**settings_kwargs),  # type: ignore
@@ -424,7 +426,29 @@ def _run_test(
             database_key=database_key,
         )
         try:
-            if failure_blob is not None:
+            if one_shot:
+                data = runner.new_conjecture_data([], observer=DataObserver())
+                with contextlib.suppress(StopTest):
+                    state.test_function(data)
+                data.freeze()
+
+                is_interesting = data.status is Status.INTERESTING
+                is_valid = data.status is Status.VALID
+                is_invalid = data.status is Status.INVALID
+                result = {
+                    "passed": not is_interesting,
+                    "test_cases": 1,
+                    "valid_test_cases": int(is_valid),
+                    "invalid_test_cases": int(is_invalid),
+                    "interesting_test_cases": int(is_interesting),
+                    "seed": str(seed),
+                    "failure_blobs": (
+                        [encode_failure(data.choices)] if is_interesting else []
+                    ),
+                }
+                stream.send_request({"event": "test_done", "results": result}).get()
+                return result
+            elif failure_blob is not None:
                 choices = decode_failure(failure_blob)
                 data = ConjectureData.for_choices(choices)
                 with contextlib.suppress(StopTest):

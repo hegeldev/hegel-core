@@ -1,5 +1,6 @@
 """Tests for server.py uncovered paths."""
 
+import os
 import socket
 import time
 from threading import Thread
@@ -915,3 +916,115 @@ def test_server_run_metrics_multiple_failures(client, monkeypatch, tmp_path):
 
     result = json.loads(run_metrics_file.read_text(encoding="utf-8"))
     assert result["interesting_test_cases"] > 1
+
+
+def test_one_shot_runs_single_passing_case(client):
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    client.run_test(test, one_shot=True)
+
+    assert call_count[0] == 1
+    assert client.last_result["test_cases"] == 1
+    assert client.last_result["valid_test_cases"] == 1
+    assert client.last_result["interesting_test_cases"] == 0
+    assert client.last_result["passed"] is True
+
+
+def test_one_shot_is_final(client):
+    """A one-shot test case runs in is_final=True mode."""
+    from tests.client.client import _is_final
+
+    seen_is_final = []
+
+    def test():
+        seen_is_final.append(_is_final.get())
+
+    client.run_test(test, one_shot=True)
+    assert seen_is_final == [True]
+
+
+def test_one_shot_invalid_assume(client):
+    def test():
+        assume(False)
+
+    client.run_test(test, one_shot=True)
+
+    assert client.last_result["test_cases"] == 1
+    assert client.last_result["invalid_test_cases"] == 1
+    assert client.last_result["valid_test_cases"] == 0
+    assert client.last_result["interesting_test_cases"] == 0
+    assert client.last_result["passed"] is True
+
+
+def test_one_shot_failing_propagates_exception(client):
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        raise AssertionError("boom")
+
+    with pytest.raises(AssertionError, match="boom"):
+        client.run_test(test, one_shot=True)
+
+    assert call_count[0] == 1
+
+
+def test_one_shot_no_shrinking_no_replay(client):
+    """One-shot runs exactly once even when the test fails."""
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        # A test that would normally be shrunk extensively.
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 10**9},
+        )
+        assert x < 0
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, one_shot=True)
+
+    assert call_count[0] == 1
+
+
+@pytest.mark.skipif(
+    bool(os.environ.get("ANTITHESIS_OUTPUT_DIR")),
+    reason="hypothesis-urandom backend does not honor the seed",
+)
+def test_one_shot_with_seed_is_deterministic(client):
+    seen = []
+
+    def test():
+        seen.append(
+            generate_from_schema(
+                {"type": "integer", "min_value": 0, "max_value": 10**9},
+            )
+        )
+
+    client.run_test(test, one_shot=True, seed=12345)
+    client.run_test(test, one_shot=True, seed=12345)
+
+    assert seen[0] == seen[1]
+
+
+def test_one_shot_generation_works(client):
+    """A one-shot test can use the full generator surface (lists, spans, etc.)."""
+
+    def test():
+        xs = generate_from_schema(
+            {
+                "type": "list",
+                "elements": {"type": "integer", "min_value": 0, "max_value": 100},
+                "min_size": 1,
+                "max_size": 5,
+            }
+        )
+        assert 1 <= len(xs) <= 5
+        for x in xs:
+            assert 0 <= x <= 100
+
+    client.run_test(test, one_shot=True)

@@ -643,6 +643,15 @@ Followed by a CBOR-encoded payload and a terminator byte (`0x0A`).
 
 - **Request ID matching**: Always verify reply ID matches request ID.
 
+### One-shot Tests
+
+The `run_test` command accepts an optional `one_shot` boolean field. When `true`,
+the server runs exactly one test case in final mode (i.e. the `test_case` event
+is sent with `is_final: true`), reports the result via `test_done`, and performs
+no shrinking, no replay of interesting examples, and no other exploration.
+Clients that want to execute a single property-test pass and then exit
+immediately should set `one_shot: true`.
+
 ## Error Handling
 
 ### The `assume()` Function
