@@ -1,6 +1,7 @@
 """Tests for server.py uncovered paths."""
 
 import socket
+import sys
 import time
 from threading import Thread
 
@@ -1007,6 +1008,10 @@ def test_one_shot_with_seed_is_deterministic(client, monkeypatch):
     assert seen[0] == seen[1]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="hypothesis-urandom falls back to the deterministic backend on Windows",
+)
 def test_one_shot_with_seed_is_nondeterministic_under_urandom(
     client, monkeypatch, tmp_path
 ):
@@ -1048,7 +1053,7 @@ def test_one_shot_with_failure_blob_is_error(client):
     def test():
         generate_from_schema({"type": "integer"})
 
-    with pytest.raises(ValueError, match="one_shot.*failure_blob"):
+    with pytest.raises(ValueError, match=r"one_shot.*failure_blob"):
         client.run_test(test, one_shot=True, failure_blob=b"\x00\x00\x00\x00")
 
 
