@@ -162,6 +162,8 @@ func main() {
 
 4. **Breaking the 1:1 line count.** Client metrics lines must match server metrics lines. Each `mark_complete` = one server line. Each test function call = one client line.
 
+5. **Being defensive when parsing JSON values.** Use direct indexing (`params["mode"]`, `metrics["value"]`) rather than `.get(..., default)` when reading conformance params or metrics. Missing keys indicate a real bug in the test setup or the library binary, and a `KeyError` is a clearer signal than silently using a fallback value.
+
 ## Reference Repos
 
 - **hegel-go**: `internal/conformance/cmd/` has Go binaries, `tests/conformance/` has pytest
