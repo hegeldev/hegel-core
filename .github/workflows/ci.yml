@@ -56,6 +56,22 @@ jobs:
           path: .coverage.normal
           include-hidden-files: true
 
+  test-windows:
+    name: tests (windows)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-tools
+        with:
+          tools: just uv
+
+      - name: Run tests
+        run: just check-tests
+
   test-antithesis:
     name: tests (antithesis)
     runs-on: ubuntu-latest

@@ -183,8 +183,12 @@ class ConformanceTest(ABC):
         """Run the library binary and validate its output."""
         # Use delete=False because on Windows, NamedTemporaryFile holds an
         # exclusive lock that prevents the subprocess from opening the file.
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
-        sf = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        )
+        sf = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        )
         try:
             metrics_file = Path(f.name)
             server_metrics_file = Path(sf.name)
@@ -196,8 +200,6 @@ class ConformanceTest(ABC):
                 [sys.executable, str(self.binary), input_json],
                 env={
                     **os.environ,
-                    # Ensure UTF-8 encoding on Windows (default is cp1252)
-                    "PYTHONUTF8": "1",
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
                     "CONFORMANCE_TEST_CASES": str(self.test_cases),
                     "CONFORMANCE_SERVER_METRICS_FILE": str(server_metrics_file),
@@ -205,6 +207,7 @@ class ConformanceTest(ABC):
                 },
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
 
             if result.returncode != 0:
@@ -216,11 +219,11 @@ class ConformanceTest(ABC):
 
             metrics_list = [
                 json.loads(line)
-                for line in metrics_file.read_text().split("\n")
+                for line in metrics_file.read_text(encoding="utf-8").split("\n")
                 if line
             ]
 
-            server_metrics_text = server_metrics_file.read_text()
+            server_metrics_text = server_metrics_file.read_text(encoding="utf-8")
             if server_metrics_text:
                 server_metrics_list = [
                     json.loads(line) for line in server_metrics_text.split("\n") if line

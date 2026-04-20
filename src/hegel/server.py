@@ -208,7 +208,7 @@ class HegelState:
                             "CONFORMANCE_SERVER_METRICS_FILE"
                         )
                         if server_metrics_file is not None:
-                            with open(server_metrics_file, "a") as mf:
+                            with open(server_metrics_file, "a", encoding="utf-8") as mf:
                                 mf.write(
                                     json.dumps({"generate_call_count": generate_count})
                                     + "\n"
