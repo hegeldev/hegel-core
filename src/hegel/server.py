@@ -177,9 +177,10 @@ class HegelState:
             ).get()
 
             done = False
+            pending_completion: tuple[Status, str | None] | None = None
 
             def handle_client_request(message: dict) -> Any:
-                nonlocal done, generate_count
+                nonlocal done, generate_count, pending_completion
                 try:
                     command = message["command"]
 
@@ -213,24 +214,20 @@ class HegelState:
                                     json.dumps({"generate_call_count": generate_count})
                                     + "\n"
                                 )
-                        status = Status[message["status"]]
-                        origin = message.get("origin")
                         # conclude_test/mark_invalid/mark_interesting all raise
                         # StopTest as Hypothesis's control-flow mechanism for
-                        # ending a test case. We're already at the end of the
-                        # handler and the `done` flag will exit the request
-                        # loop, so swallow it here to stop it propagating
-                        # through the protocol layer.
-                        with contextlib.suppress(StopTest):
-                            if status is Status.VALID:
-                                data.conclude_test(Status.VALID)
-                            elif status is Status.INVALID:
-                                data.mark_invalid()
-                            else:
-                                assert status is Status.INTERESTING
-                                data.mark_interesting(
-                                    origin,  # type: ignore[arg-type]
-                                )
+                        # ending a test case. Record the requested completion
+                        # and apply it after handle_requests returns, so the
+                        # mark_complete request gets its normal success reply
+                        # and the StopTest propagates out of test_function to
+                        # Hypothesis's engine (which is how Hypothesis expects
+                        # a test case to end) without going through the
+                        # protocol-level error reply machinery.
+                        pending_completion = (
+                            Status[message["status"]],
+                            message.get("origin"),
+                        )
+                        return None
                     elif command == "new_collection":
                         collection_id = next(collection_id_counter)
                         assert collection_id not in collections
@@ -292,6 +289,16 @@ class HegelState:
                     raise
 
             test_case_stream.handle_requests(handle_client_request, until=lambda: done)
+
+            if pending_completion is not None:
+                status, origin = pending_completion
+                if status is Status.VALID:
+                    data.conclude_test(Status.VALID)
+                elif status is Status.INVALID:
+                    data.mark_invalid()
+                else:
+                    assert status is Status.INTERESTING
+                    data.mark_interesting(origin)  # type: ignore[arg-type]
 
 
 def run_server_on_connection(connection: Connection) -> None:
