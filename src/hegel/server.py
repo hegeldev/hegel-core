@@ -370,6 +370,19 @@ def _run_test(
     - failure: optional dict with failure details
     """
     try:
+        if one_shot and failure_blob is not None:
+            result: dict[str, Any] = {
+                "passed": False,
+                "test_cases": 0,
+                "valid_test_cases": 0,
+                "invalid_test_cases": 0,
+                "interesting_test_cases": 0,
+                "seed": str(seed),
+                "error": "Cannot combine one_shot with failure_blob.",
+            }
+            stream.send_request({"event": "test_done", "results": result}).get()
+            return result
+
         # seed takes precendence over derandomize, like Hypothesis
         if derandomize and seed is None:
             seed = (
@@ -385,7 +398,7 @@ def _run_test(
                 suppress.append(check)
             else:
                 valid = list(SUPPORTED_HEALTH_CHECKS.keys())
-                result: dict[str, Any] = {
+                result = {
                     "passed": False,
                     "test_cases": 0,
                     "valid_test_cases": 0,
@@ -427,11 +440,9 @@ def _run_test(
         )
         try:
             if one_shot:
-                if failure_blob is not None:
-                    choices = decode_failure(failure_blob)
-                    data = ConjectureData.for_choices(choices)
-                else:
-                    data = runner.new_conjecture_data([], observer=DataObserver())
+                data = runner.new_conjecture_data(
+                    [], observer=DataObserver(), max_choices=2**64
+                )
                 with contextlib.suppress(StopTest):
                     state.test_function(data)
                 data.freeze()

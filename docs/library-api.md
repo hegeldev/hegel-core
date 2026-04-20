@@ -652,9 +652,9 @@ no shrinking, no replay of interesting examples, and no other exploration.
 Clients that want to execute a single property-test pass and then exit
 immediately should set `one_shot: true`.
 
-If `failure_blob` is also provided, the one-shot run replays the choices from
-the blob instead of generating fresh random data. This is the simplest way to
-reproduce a previously reported failure without any additional exploration.
+`one_shot` cannot be combined with `failure_blob`: the internal entropy budget
+used by a one-shot run is different from the one used for normal runs, so
+failure blobs produced by the two modes are not interchangeable.
 
 ## Error Handling
 
