@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 - 2026-04-20
+
+This release is in support of getting hegel libraries working on Windows. It mostly fixes issues affecting the conformance testing.
+
+Windows support still won't work in individual libraries until they also do work to support it.
+
 ## 0.4.3 - 2026-04-15
 
 This patch adds a new `OneOfConformance` test, for the `one_of` generator.
