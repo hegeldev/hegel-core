@@ -14,7 +14,7 @@ def main():
     @settings(max_examples=test_cases, database=None)
     @given(st.integers(min_value=params["min_value"], max_value=params["max_value"]))
     def run(value):
-        with open(metrics_file, "a") as f:
+        with open(metrics_file, "a", encoding="utf-8") as f:
             f.write(json.dumps({"value": value}) + "\n")
 
     run()

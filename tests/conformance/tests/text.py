@@ -37,7 +37,7 @@ def main():
     @given(st.text(st.characters(**char_kwargs), **text_kwargs))
     def run(value):
         codepoints = [ord(c) for c in value]
-        with open(metrics_file, "a") as f:
+        with open(metrics_file, "a", encoding="utf-8") as f:
             f.write(json.dumps({"codepoints": codepoints}) + "\n")
 
     run()

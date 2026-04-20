@@ -17,13 +17,14 @@ def _make_conformance_binary(script_body):
         suffix=".py",
         delete=False,
         prefix="conform_",
+        encoding="utf-8",
     ) as f:
         f.write(f"#!{sys.executable}\n")
         f.write("import json, os, sys\n")
         f.write("params = json.loads(sys.argv[1])\n")
         f.write("metrics_file = os.environ['CONFORMANCE_METRICS_FILE']\n")
         f.write("test_cases = int(os.environ['CONFORMANCE_TEST_CASES'])\n")
-        f.write("with open(metrics_file, 'w') as mf:\n")
+        f.write("with open(metrics_file, 'w', encoding='utf-8') as mf:\n")
         f.write(f"    {script_body}\n")
     f.close()
     os.chmod(f.name, os.stat(f.name).st_mode | stat.S_IEXEC)

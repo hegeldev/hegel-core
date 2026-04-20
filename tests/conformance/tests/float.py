@@ -54,7 +54,7 @@ def main():
             "is_nan": math.isnan(value),
             "is_infinite": math.isinf(value),
         }
-        with open(metrics_file, "a") as f:
+        with open(metrics_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(metrics) + "\n")
 
     run()

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from abc import ABC, abstractmethod
@@ -180,16 +181,23 @@ class ConformanceTest(ABC):
 
     def run(self, params: dict[str, Any]) -> None:
         """Run the library binary and validate its output."""
-        with (
-            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f,
-            tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as sf,
-        ):
+        # Use delete=False because on Windows, NamedTemporaryFile holds an
+        # exclusive lock that prevents the subprocess from opening the file.
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        )
+        sf = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        )
+        try:
             metrics_file = Path(f.name)
             server_metrics_file = Path(sf.name)
+            f.close()
+            sf.close()
             input_json = json.dumps(params)
 
             result = subprocess.run(
-                [str(self.binary), input_json],
+                [sys.executable, str(self.binary), input_json],
                 env={
                     **os.environ,
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
@@ -199,6 +207,7 @@ class ConformanceTest(ABC):
                 },
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
 
             if result.returncode != 0:
@@ -210,11 +219,11 @@ class ConformanceTest(ABC):
 
             metrics_list = [
                 json.loads(line)
-                for line in metrics_file.read_text().split("\n")
+                for line in metrics_file.read_text(encoding="utf-8").split("\n")
                 if line
             ]
 
-            server_metrics_text = server_metrics_file.read_text()
+            server_metrics_text = server_metrics_file.read_text(encoding="utf-8")
             if server_metrics_text:
                 server_metrics_list = [
                     json.loads(line) for line in server_metrics_text.split("\n") if line
@@ -232,6 +241,9 @@ class ConformanceTest(ABC):
                     "If this binary does not use the hegel server, pass "
                     "skip_server_metrics=True."
                 )
+        finally:
+            metrics_file.unlink(missing_ok=True)
+            server_metrics_file.unlink(missing_ok=True)
 
         self.validate(metrics_list, params)
 

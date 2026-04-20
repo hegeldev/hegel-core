@@ -16,14 +16,14 @@ check-typing:
     uv run mypy src/
 
 check-tests:
-    uv run pytest tests
+    PYTHONWARNDEFAULTENCODING=1 uv run pytest tests
 
 check-tests-coverage-normal:
-    uv run coverage run --data-file=.coverage.normal -m pytest tests
+    PYTHONWARNDEFAULTENCODING=1 uv run coverage run --data-file=.coverage.normal -m pytest tests
     uv run coverage combine --data-file=.coverage.normal
 
 check-tests-coverage-antithesis:
-    ANTITHESIS_OUTPUT_DIR="$HOME/antithesis-output" uv run coverage run --data-file=.coverage.antithesis -m pytest tests
+    ANTITHESIS_OUTPUT_DIR="$HOME/antithesis-output" PYTHONWARNDEFAULTENCODING=1 uv run coverage run --data-file=.coverage.antithesis -m pytest tests
     uv run coverage combine --data-file=.coverage.antithesis
 
 check-coverage-report:

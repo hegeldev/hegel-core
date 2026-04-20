@@ -630,6 +630,7 @@ def test_invalid_hegel_debug_env_var():
         env={**os.environ, "HEGEL_PROTOCOL_DEBUG": "invalid"},
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode != 0
     assert "invalid value for HEGEL_PROTOCOL_DEBUG" in result.stderr

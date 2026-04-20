@@ -163,6 +163,11 @@ warn_redundant_casts = true
 
 disable_error_code = "annotation-unchecked"
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error::EncodingWarning",
+]
+
 [tool.coverage.run]
 branch = true
 parallel = true
