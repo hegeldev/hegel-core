@@ -1011,6 +1011,86 @@ def test_one_shot_with_seed_is_deterministic(client):
     assert seen[0] == seen[1]
 
 
+def test_one_shot_with_failure_blob_replays_once(client):
+    """one_shot with a failure_blob replays the blob exactly once in final mode."""
+
+    def test():
+        assert (
+            generate_from_schema({"type": "integer", "min_value": 0, "max_value": 1000})
+            <= 10
+        )
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, test_cases=100)
+
+    blob = client.last_result["failure_blobs"][0]
+
+    call_count = [0]
+
+    def replay():
+        call_count[0] += 1
+        assert (
+            generate_from_schema({"type": "integer", "min_value": 0, "max_value": 1000})
+            <= 10
+        )
+
+    with pytest.raises(AssertionError):
+        client.run_test(replay, one_shot=True, failure_blob=blob)
+
+    assert call_count[0] == 1
+
+
+def test_one_shot_with_failure_blob_that_no_longer_fails(client):
+    """one_shot with a blob that no longer reproduces still runs exactly once."""
+
+    def failing_test():
+        assert (
+            generate_from_schema({"type": "integer", "min_value": 0, "max_value": 1000})
+            <= 10
+        )
+
+    with pytest.raises(AssertionError):
+        client.run_test(failing_test, test_cases=100)
+
+    blob = client.last_result["failure_blobs"][0]
+
+    call_count = [0]
+
+    def passing_test():
+        call_count[0] += 1
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 1000})
+
+    with pytest.raises(AssertionError, match="failure blob did not reproduce"):
+        client.run_test(passing_test, one_shot=True, failure_blob=blob)
+
+    assert call_count[0] == 1
+
+
+def test_one_shot_with_failure_blob_uses_blob_choices(client):
+    """one_shot with a failure_blob replays the exact choices from the blob."""
+    captured = []
+
+    def test():
+        captured.append(
+            generate_from_schema(
+                {"type": "integer", "min_value": 0, "max_value": 10**9}
+            )
+        )
+        assert captured[-1] <= 10
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, test_cases=100)
+
+    blob = client.last_result["failure_blobs"][0]
+    failing_value = captured[-1]
+    captured.clear()
+
+    with pytest.raises(AssertionError):
+        client.run_test(test, one_shot=True, failure_blob=blob)
+
+    assert captured == [failing_value]
+
+
 def test_one_shot_generation_works(client):
     """A one-shot test can use the full generator surface (lists, spans, etc.)."""
 

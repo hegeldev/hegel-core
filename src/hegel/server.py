@@ -427,7 +427,11 @@ def _run_test(
         )
         try:
             if one_shot:
-                data = runner.new_conjecture_data([], observer=DataObserver())
+                if failure_blob is not None:
+                    choices = decode_failure(failure_blob)
+                    data = ConjectureData.for_choices(choices)
+                else:
+                    data = runner.new_conjecture_data([], observer=DataObserver())
                 with contextlib.suppress(StopTest):
                     state.test_function(data)
                 data.freeze()
