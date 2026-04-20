@@ -443,6 +443,9 @@ def _run_test(
                 data = runner.new_conjecture_data(
                     [], observer=DataObserver(), max_choices=2**64
                 )
+                # Lift the default per-test-case entropy budget so one-shot
+                # tests can generate as much data as they like.
+                data.max_length = 2**64
                 with contextlib.suppress(StopTest):
                     state.test_function(data)
                 data.freeze()

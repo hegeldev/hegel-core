@@ -1011,6 +1011,18 @@ def test_one_shot_with_seed_is_deterministic(client):
     assert seen[0] == seen[1]
 
 
+def test_one_shot_large_entropy_budget(client):
+    """A one-shot test can generate far more data than Hypothesis's default
+    per-test-case entropy budget would normally allow."""
+
+    def test():
+        for _ in range(20_000):
+            generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    client.run_test(test, one_shot=True)
+    assert client.last_result["valid_test_cases"] == 1
+
+
 def test_one_shot_with_failure_blob_is_error(client):
     """Passing both one_shot and failure_blob is rejected."""
 
