@@ -215,15 +215,22 @@ class HegelState:
                                 )
                         status = Status[message["status"]]
                         origin = message.get("origin")
-                        if status is Status.VALID:
-                            data.conclude_test(Status.VALID)
-                        elif status is Status.INVALID:
-                            data.mark_invalid()
-                        else:
-                            assert status is Status.INTERESTING
-                            data.mark_interesting(
-                                origin,  # type: ignore[arg-type]
-                            )
+                        # conclude_test/mark_invalid/mark_interesting all raise
+                        # StopTest as Hypothesis's control-flow mechanism for
+                        # ending a test case. We're already at the end of the
+                        # handler and the `done` flag will exit the request
+                        # loop, so swallow it here to stop it propagating
+                        # through the protocol layer.
+                        with contextlib.suppress(StopTest):
+                            if status is Status.VALID:
+                                data.conclude_test(Status.VALID)
+                            elif status is Status.INVALID:
+                                data.mark_invalid()
+                            else:
+                                assert status is Status.INTERESTING
+                                data.mark_interesting(
+                                    origin,  # type: ignore[arg-type]
+                                )
                     elif command == "new_collection":
                         collection_id = next(collection_id_counter)
                         assert collection_id not in collections
@@ -274,7 +281,8 @@ class HegelState:
                         raise ValueError(f"Unknown command: {command}")
                 except UnsatisfiedAssumption:
                     done = True
-                    data.mark_invalid()
+                    with contextlib.suppress(StopTest):
+                        data.mark_invalid()
                 except StopTest:
                     done = True
                     raise

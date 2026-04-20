@@ -4,6 +4,7 @@ import socket
 import time
 from threading import Thread
 
+import cbor2
 import pytest
 from hypothesis import strategies as st
 from hypothesis.errors import UnsatisfiedAssumption
@@ -741,3 +742,138 @@ def test_server_metrics_file(client, monkeypatch, tmp_path):
     assert len(lines) >= 5
     for entry in lines:
         assert entry["generate_call_count"] == 2
+
+
+def _run_test_case_round(conn, test_stream, event_message, *, status, origin):
+    """Handle a single test_case event: generate, mark_complete, return reply."""
+    data_stream = conn.connect_stream(event_message["stream_id"])
+    test_stream.write_reply(event_message["_packet"].message_id, None)
+
+    data_packet = data_stream.write_request(
+        cbor2.dumps({"command": "generate", "schema": {"type": "boolean"}}),
+    )
+    data_stream.read_reply(data_packet.message_id)
+
+    mc_packet = data_stream.write_request(
+        cbor2.dumps(
+            {
+                "command": "mark_complete",
+                "status": status,
+                "origin": origin,
+            },
+        ),
+    )
+    reply = cbor2.loads(data_stream.read_reply(mc_packet.message_id).payload)
+    data_stream.close()
+    return reply
+
+
+def _drive_run_until_done(status, *, origin=None, test_cases=1):
+    """Drive a full run_test loop using raw wire primitives, replying to every
+    test_case with ``mark_complete(status)`` and collecting each mark_complete
+    reply payload.
+
+    Returns (all_replies, test_done_results).
+    """
+    server_socket, client_socket = socket.socketpair()
+    thread = Thread(
+        target=run_server_on_connection,
+        args=(Connection(server_socket, name="Server"),),
+        daemon=True,
+    )
+    thread.start()
+
+    replies = []
+
+    with ClientConnection(client_socket) as conn:
+        conn.send_handshake()
+
+        test_stream = conn.new_stream()
+        packet = conn.control_stream.write_request(
+            cbor2.dumps(
+                {
+                    "command": "run_test",
+                    "test_cases": test_cases,
+                    "stream_id": test_stream.stream_id,
+                },
+            ),
+        )
+        conn.control_stream.read_reply(packet.message_id)
+
+        while True:
+            event_packet = test_stream.read_request()
+            event_message = cbor2.loads(event_packet.payload)
+            if event_message["event"] == "test_done":
+                test_stream.write_reply(event_packet.message_id, True)
+                results = event_message["results"]
+                break
+
+            assert event_message["event"] == "test_case"
+            event_message["_packet"] = event_packet
+            replies.append(
+                _run_test_case_round(
+                    conn,
+                    test_stream,
+                    event_message,
+                    status=status,
+                    origin=origin,
+                ),
+            )
+
+        # After test_done the server replays each interesting example as a
+        # final test case. Drain those so the server can exit cleanly instead
+        # of failing a write into a closed socket.
+        for _ in range(results.get("interesting_test_cases", 0)):
+            event_packet = test_stream.read_request()
+            event_message = cbor2.loads(event_packet.payload)
+            assert event_message["event"] == "test_case"
+            event_message["_packet"] = event_packet
+            _run_test_case_round(
+                conn,
+                test_stream,
+                event_message,
+                status=status,
+                origin=origin,
+            )
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    return replies, results
+
+
+def test_mark_complete_valid_does_not_leak_stop_test():
+    # data.conclude_test(Status.VALID) raises StopTest as Hypothesis's
+    # control-flow mechanism for ending a test case. That StopTest must
+    # not propagate out of the mark_complete handler: if it does,
+    # handle_requests sends a bogus error reply for the mark_complete
+    # packet, and the StopTest itself can escape far enough up the stack
+    # to abort the server process (see the hegel-rust shared-session
+    # failure in CI).
+    replies, results = _drive_run_until_done("VALID")
+    assert all("error" not in r for r in replies), replies
+    assert results["passed"]
+
+
+def test_mark_complete_invalid_does_not_leak_stop_test():
+    # Same as the VALID case, but exercises data.mark_invalid() which also
+    # raises StopTest. The runner keeps asking for more test cases until
+    # it exits (too few valid examples), so drive the full loop and check
+    # every mark_complete reply.
+    replies, _ = _drive_run_until_done("INVALID", test_cases=5)
+    assert replies, "expected at least one test_case round"
+    assert all("error" not in r for r in replies), replies
+
+
+def test_mark_complete_interesting_does_not_leak_stop_test():
+    # Same as the VALID case, but exercises data.mark_interesting() which
+    # also raises StopTest. Marking INTERESTING triggers shrinking, so the
+    # runner will issue many more test_case events; every mark_complete
+    # reply must still be a success reply.
+    replies, results = _drive_run_until_done(
+        "INTERESTING",
+        origin="AssertionError at foo.py:1",
+        test_cases=5,
+    )
+    assert replies, "expected at least one test_case round"
+    assert all("error" not in r for r in replies), replies
+    assert not results["passed"]
