@@ -61,7 +61,7 @@ def _write_run_metrics(result: dict[str, Any]) -> None:
     server run metrics file, if set."""
     run_metrics_file = os.environ.get("CONFORMANCE_SERVER_RUN_METRICS_FILE")
     if run_metrics_file is not None:
-        with open(run_metrics_file, "w") as mf:
+        with open(run_metrics_file, "w", encoding="utf-8") as mf:
             mf.write(
                 json.dumps({"interesting_test_cases": result["interesting_test_cases"]})
             )

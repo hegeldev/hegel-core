@@ -79,7 +79,7 @@ def main():
             x = generate_from_schema(
                 {"type": "integer", "min_value": 0, "max_value": 100}
             )
-            with open(metrics_file, "a") as f:
+            with open(metrics_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps({}) + "\n")
             if mode == "value_in_error_message":
                 assert x <= 10, f"Generated value {x} exceeded threshold 10"

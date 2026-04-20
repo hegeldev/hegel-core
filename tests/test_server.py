@@ -857,7 +857,7 @@ def test_server_run_metrics_passing(client, monkeypatch, tmp_path):
 
     client.run_test(test, test_cases=10)
 
-    result = json.loads(run_metrics_file.read_text())
+    result = json.loads(run_metrics_file.read_text(encoding="utf-8"))
     assert result["interesting_test_cases"] == 0
 
 
@@ -876,7 +876,7 @@ def test_server_run_metrics_single_failure(client, monkeypatch, tmp_path):
     with pytest.raises(AssertionError):
         client.run_test(test, test_cases=100)
 
-    result = json.loads(run_metrics_file.read_text())
+    result = json.loads(run_metrics_file.read_text(encoding="utf-8"))
     assert result["interesting_test_cases"] == 1
 
 
@@ -902,5 +902,5 @@ def test_server_run_metrics_multiple_failures(client, monkeypatch, tmp_path):
     with pytest.raises((AssertionError, ExceptionGroup)):
         client.run_test(test, test_cases=100)
 
-    result = json.loads(run_metrics_file.read_text())
+    result = json.loads(run_metrics_file.read_text(encoding="utf-8"))
     assert result["interesting_test_cases"] > 1
