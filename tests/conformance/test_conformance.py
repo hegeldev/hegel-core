@@ -10,6 +10,7 @@ from hegel.conformance import (
     IntegerConformance,
     ListConformance,
     OneOfConformance,
+    OriginDeduplicationConformance,
     SampledFromConformance,
     StopTestOnCollectionMoreConformance,
     StopTestOnGenerateConformance,
@@ -47,6 +48,7 @@ def test_conformance(subtests):
             SampledFromConformance(TESTS_DIR / "sampled_from.py", **skip),
             OneOfConformance(TESTS_DIR / "one_of.py", **skip),
             DictConformance(TESTS_DIR / "dict.py", **skip),
+            OriginDeduplicationConformance(TESTS_DIR / "origin_deduplication.py"),
         ],
         subtests,
         skip_tests=[

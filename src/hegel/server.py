@@ -56,6 +56,17 @@ def _flaky_message(error: Flaky) -> str:
     return FLAKY_TEST_RESULT_MSG
 
 
+def _write_run_metrics(result: dict[str, Any]) -> None:
+    """Write per-run metrics (interesting_test_cases) to the conformance
+    server run metrics file, if set."""
+    run_metrics_file = os.environ.get("CONFORMANCE_SERVER_RUN_METRICS_FILE")
+    if run_metrics_file is not None:
+        with open(run_metrics_file, "w", encoding="utf-8") as mf:
+            mf.write(
+                json.dumps({"interesting_test_cases": result["interesting_test_cases"]})
+            )
+
+
 def _flaky_result(
     runner: ConjectureRunner,
     seed: int,
@@ -463,10 +474,12 @@ def _run_test(
                 "seed": str(seed),
                 "health_check_failure": str(e),
             }
+            _write_run_metrics(result)
             stream.send_request({"event": "test_done", "results": result}).get()
             return result
         except Flaky as e:
             result = _flaky_result(runner, seed, e, state.flaky_error)
+            _write_run_metrics(result)
             stream.send_request({"event": "test_done", "results": result}).get()
             return result
 
@@ -479,6 +492,7 @@ def _run_test(
             result["passed"] = False
             result["flaky"] = FLAKY_TEST_RESULT_MSG
 
+        _write_run_metrics(result)
         stream.send_request({"event": "test_done", "results": result}).get()
 
         final_state = HegelState(connection, stream, is_final=True)
