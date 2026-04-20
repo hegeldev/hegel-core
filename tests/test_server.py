@@ -1,6 +1,5 @@
 """Tests for server.py uncovered paths."""
 
-import os
 import socket
 import time
 from threading import Thread
@@ -991,11 +990,8 @@ def test_one_shot_no_shrinking_no_replay(client):
     assert call_count[0] == 1
 
 
-@pytest.mark.skipif(
-    bool(os.environ.get("ANTITHESIS_OUTPUT_DIR")),
-    reason="hypothesis-urandom backend does not honor the seed",
-)
-def test_one_shot_with_seed_is_deterministic(client):
+def test_one_shot_with_seed_is_deterministic(client, monkeypatch):
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
     seen = []
 
     def test():
@@ -1009,6 +1005,29 @@ def test_one_shot_with_seed_is_deterministic(client):
     client.run_test(test, one_shot=True, seed=12345)
 
     assert seen[0] == seen[1]
+
+
+def test_one_shot_with_seed_is_nondeterministic_under_urandom(
+    client, monkeypatch, tmp_path
+):
+    """Under the hypothesis-urandom backend the seed is ignored, so the same
+    seed produces different values across runs."""
+    monkeypatch.setenv("ANTITHESIS_OUTPUT_DIR", str(tmp_path))
+    seen = set()
+
+    def test():
+        seen.add(
+            generate_from_schema(
+                {"type": "integer", "min_value": 0, "max_value": 10**9},
+            )
+        )
+
+    # Four runs with the same seed. Under urandom, each draw is independent,
+    # so the chance of all four producing the same value is ~(10**-9)**3.
+    for _ in range(4):
+        client.run_test(test, one_shot=True, seed=12345)
+
+    assert len(seen) > 1
 
 
 def test_one_shot_large_entropy_budget(client):
