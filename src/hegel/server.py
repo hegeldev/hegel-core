@@ -330,14 +330,15 @@ def run_server_on_connection(connection: Connection) -> None:
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
-                elif command == "one_shot":
+                elif command == "single_test_case":
                     stream = connection.register_client_stream(
-                        message["stream_id"], role="One-shot stream"
+                        message["stream_id"],
+                        role="Single test case stream",
                     )
 
                     pending_futures.append(
                         thread_pool.submit(
-                            _one_shot,
+                            _single_test_case,
                             connection,
                             stream,
                             seed=message.get("seed"),
@@ -360,13 +361,13 @@ def run_server_on_connection(connection: Connection) -> None:
             f.cancel()
 
 
-def _one_shot(
+def _single_test_case(
     connection: Connection,
     stream: Stream,
     *,
     seed: int | None,
 ) -> dict[str, Any]:
-    """Run a single one-shot test case.
+    """Run a single test case.
 
     Immediately hands a single test case to the client on the provided stream,
     with is_final=True. No shrinking, no replay, no exploration.

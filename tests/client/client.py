@@ -51,18 +51,18 @@ class Client:
         self.__lock = threading.Lock()
         self.last_result: dict | None = None
 
-    def one_shot(
+    def single_test_case(
         self,
         test_fn: Callable[[], None],
         *,
         seed: int | None = None,
     ) -> None:
-        """Run a single one-shot test case."""
+        """Run a single test case."""
 
         test_stream = self.connection.new_stream()
 
         message: dict[str, Any] = {
-            "command": "one_shot",
+            "command": "single_test_case",
             "seed": seed,
             "stream_id": test_stream.stream_id,
         }
@@ -105,10 +105,10 @@ class Client:
         if n_interesting == 0:
             return
 
-        # One-shot runs in final mode, so the exception was already raised
-        # during the test_case handling above. This path handles the case
-        # where is_final was set but the exception wasn't propagated.
-        raise ValueError("One-shot test failed but exception was not propagated")
+        # single_test_case runs in final mode, so the exception was already
+        # raised during the test_case handling above. This path handles the
+        # case where is_final was set but the exception wasn't propagated.
+        raise ValueError("single_test_case failed but exception was not propagated")
 
     def run_test(
         self,
