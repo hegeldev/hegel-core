@@ -32,8 +32,11 @@ class StdioTransport:
         return data
 
     def sendall(self, data):
-        self._writer.write(data)
-        self._writer.flush()
+        try:
+            self._writer.write(data)
+            self._writer.flush()
+        except ValueError as e:
+            raise OSError(str(e)) from e
 
     def settimeout(self, timeout):
         pass  # No timeout support for stdio

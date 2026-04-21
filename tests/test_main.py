@@ -149,6 +149,18 @@ def test_stdio_transport_recv_eof():
     transport.close()
 
 
+def test_stdio_transport_sendall_after_close_raises_oserror():
+    """StdioTransport.sendall raises OSError (not ValueError) when writer is closed."""
+    import io
+
+    reader = io.BytesIO(b"")
+    writer = io.BytesIO(b"")
+    transport = StdioTransport(reader, writer)
+    transport.close()
+    with pytest.raises(OSError):
+        transport.sendall(b"hello")
+
+
 def test_stdio_transport_recv_none():
     """Cover the `data is None` branch in recv."""
 
