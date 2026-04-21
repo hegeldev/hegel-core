@@ -82,6 +82,13 @@ def test_connection_debug_mode(socket, name, payload):
         conn._debug_packet(packet, direction="TEST")
 
 
+def test_connection_debug_unknown_stream(socket):
+    """_debug_packet handles packets for unknown stream_ids without crashing."""
+    with Connection(socket, name="Dbg", debug=True) as conn:
+        packet = Packet(stream_id=9999, message_id=1, is_reply=False, payload=b"hello")
+        conn._debug_packet(packet, direction="TEST")
+
+
 @pytest.mark.parametrize(
     "send_fn",
     [
@@ -198,8 +205,14 @@ def test_stream_repr_variations(socket_pair, role, expected):
         assert expected in repr(stream)
 
 
-def test_message_to_closed_stream(socket_pair):
-    """Test sending a message to a closed stream."""
+def test_request_to_closed_stream_gets_error_reply(socket_pair):
+    """Sending a request to a server-closed stream gets an error reply.
+
+    The server must not crash, and the client receives a ProtocolError so
+    it fails fast rather than hanging.
+    """
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, read_packet
+
     server_socket, client_socket = socket_pair
     with (
         Connection(server_socket) as server_conn,
@@ -210,13 +223,174 @@ def test_message_to_closed_stream(socket_pair):
         ch_server = server_conn.new_stream()
         ch_client = client_conn.connect_stream(ch_server.stream_id)
 
-        # Close the stream on server side
         ch_server.close()
         time.sleep(0.2)
 
-        # Now send a request to the closed stream from client
-        ch_client.write_request(cbor2.dumps({"test": "data"}))
+        packet = ch_client.write_request(cbor2.dumps({"test": "data"}))
+
+        # Skip the close notification packet, find our error reply.
+        while True:
+            reply = read_packet(client_socket, timeout=2.0)
+            if reply.payload == CLOSE_STREAM_PAYLOAD:
+                continue
+            if reply.is_reply and reply.message_id == packet.message_id:
+                break
+
+        assert reply.stream_id == ch_server.stream_id
+        body = cbor2.loads(reply.payload)
+        assert "error" in body
+        assert body["type"] == "ProtocolError"
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_request_for_unknown_stream_gets_error_reply(socket_pair):
+    """A request on an unregistered stream_id gets an error reply.
+
+    The server must not crash, and the client must receive a ProtocolError
+    reply so it fails fast rather than hanging.
+    """
+    from hegel.protocol.packet import read_packet, write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        bogus_stream_id = 9999
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=bogus_stream_id,
+                message_id=1,
+                is_reply=False,
+                payload=cbor2.dumps({"bad": True}),
+            ),
+        )
+
+        reply = read_packet(client_socket, timeout=2.0)
+        assert reply.stream_id == bogus_stream_id
+        assert reply.message_id == 1
+        assert reply.is_reply
+        body = cbor2.loads(reply.payload)
+        assert "error" in body
+        assert body["type"] == "ProtocolError"
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+        # Other streams still work.
+        ch_server = server_conn.new_stream()
+        ch_client = client_conn.connect_stream(ch_server.stream_id)
+
+        def server_handler():
+            @ch_server.handle_requests
+            def _(message):
+                return {"echo": message}
+
+        t = Thread(target=server_handler, daemon=True)
+        t.start()
+        assert ch_client.send_request({"ping": 1}) == {"echo": {"ping": 1}}
+
+
+def test_reply_for_unknown_stream_is_silently_discarded(socket_pair):
+    """A reply packet on an unregistered stream is discarded with no response."""
+    from hegel.protocol.packet import write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=9999,
+                message_id=1,
+                is_reply=True,
+                payload=cbor2.dumps({"result": "stale"}),
+            ),
+        )
         time.sleep(0.2)
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_error_reply_write_failure_is_suppressed(socket_pair):
+    """If sending the error reply fails (e.g. connection closing), the reader
+    loop continues without crashing."""
+    from hegel.protocol.packet import write_packet as _write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        orig_write = server_conn.write_packet
+
+        def failing_write(packet):
+            if packet.is_reply and packet.stream_id == 9999:
+                raise OSError("simulated write failure")
+            orig_write(packet)
+
+        server_conn.write_packet = failing_write
+
+        _write_packet(
+            client_socket,
+            Packet(
+                stream_id=9999,
+                message_id=1,
+                is_reply=False,
+                payload=cbor2.dumps({"bad": True}),
+            ),
+        )
+        time.sleep(0.2)
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_close_packet_with_wrong_message_id_is_discarded(socket_pair):
+    """A close-stream payload with the wrong message_id is silently discarded.
+
+    The reader loop must not crash with an AssertionError; the connection stays
+    alive.
+    """
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        ch_client = client_conn.new_stream()
+        server_conn.register_client_stream(ch_client.stream_id)
+
+        # Send a close-stream payload but with the wrong message_id.
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=ch_client.stream_id,
+                message_id=42,  # wrong — should be CLOSE_STREAM_MESSAGE_ID
+                is_reply=False,
+                payload=CLOSE_STREAM_PAYLOAD,
+            ),
+        )
+        time.sleep(0.2)
+
+        # The connection must still be alive.
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
 
 
 @pytest.mark.parametrize("create_stream_first", [False, True])
@@ -406,21 +580,20 @@ def test_duplicate_reply_id_raises(socket):
         assert result == b"a"
 
 
-def test_duplicate_reply_error(socket):
-    """Test that duplicate replies for same ID raises AssertionError."""
+def test_duplicate_reply_warns_on_stderr(socket, capsys):
+    """Duplicate replies for same ID print a warning instead of crashing."""
     with Connection(socket) as conn:
         stream = conn.control_stream
 
-        # Put a reply in the replies dict directly
         stream.replies[42] = b"first"
 
-        # Now try to process another reply with same ID
         stream.unprocessed_packets.put(
             Packet(stream_id=0, message_id=42, is_reply=True, payload=b"second")
         )
 
-        with pytest.raises(AssertionError):
-            stream._Stream__read_one_packet()
+        stream._Stream__read_one_packet()
+        captured = capsys.readouterr()
+        assert "Duplicate reply for message_id 42" in captured.err
 
 
 # ---- Connection handshake ----

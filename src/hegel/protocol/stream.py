@@ -1,3 +1,4 @@
+import sys
 from collections import deque
 from queue import Empty, SimpleQueue
 from threading import Lock
@@ -120,7 +121,11 @@ class Stream:
             raise ConnectionError("Connection closed")
 
         if packet.is_reply:
-            assert packet.message_id not in self.replies
+            if packet.message_id in self.replies:
+                print(
+                    f"Duplicate reply for message_id {packet.message_id} on {self!r}",
+                    file=sys.stderr,
+                )
             self.replies[packet.message_id] = packet
         else:
             self.requests.append(packet)
