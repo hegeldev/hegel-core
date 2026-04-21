@@ -14,7 +14,12 @@ from hegel.protocol.packet import (
     read_packet,
     write_packet,
 )
-from hegel.protocol.utils import SHUTDOWN, ConnectionClosedError, StreamId
+from hegel.protocol.utils import (
+    SHUTDOWN,
+    ConnectionClosedError,
+    ProtocolError,
+    StreamId,
+)
 
 if TYPE_CHECKING:
     from hegel.protocol.stream import Stream
@@ -139,25 +144,30 @@ class Connection:
             except Exception:
                 payload_repr = packet.payload
 
-        stream = self.streams[packet.stream_id]
+        stream = self.streams.get(packet.stream_id)
+        stream_label = (
+            str(stream)
+            if stream is not None
+            else f"<unknown stream {packet.stream_id}>"
+        )
         self._debug_print(
-            f"[{self.name or '?'}] {direction} ch={stream}"
+            f"[{self.name or '?'}] {direction} ch={stream_label}"
             f" message_id={packet.message_id}"
             f" {'reply' if packet.is_reply else 'request'}: {payload_repr!r}",
         )
 
     def close(self) -> None:
         """Close the connection and clean up resources."""
-        if not self.running:
-            return
-
-        self.running = False
-        with contextlib.suppress(OSError):
-            self.__socket.shutdown(socket.SHUT_RDWR)
-        with contextlib.suppress(OSError):
-            self.__socket.close()
-
-        for v in self.streams.values():
+        with self.__writer_lock:
+            if not self.running:
+                return
+            self.running = False
+            with contextlib.suppress(OSError):
+                self.__socket.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                self.__socket.close()
+            streams = list(self.streams.values())
+        for v in streams:
             if not v.closed:
                 v.unprocessed_packets.put(SHUTDOWN)
 
@@ -166,39 +176,87 @@ class Connection:
             while self.running:
                 packet = read_packet(self.__socket)
 
-                stream = self.streams[packet.stream_id]
+                stream = self.streams.get(packet.stream_id)
+                if stream is None:
+                    self._debug_print(
+                        f"Received packet for unknown stream {packet.stream_id}"
+                    )
+                    self._send_error_reply(
+                        packet, f"stream {packet.stream_id} is not registered"
+                    )
+                    continue
+
                 self._debug_packet(packet, direction="RECEIVE")
                 if packet.payload == CLOSE_STREAM_PAYLOAD:
-                    assert packet.message_id == CLOSE_STREAM_MESSAGE_ID
+                    if packet.message_id != CLOSE_STREAM_MESSAGE_ID:
+                        self._debug_print(
+                            f"Ignoring close packet with wrong message_id"
+                            f" {packet.message_id} for {stream}"
+                        )
+                        continue
                     self._debug_print(f"Received close for {stream}")
                     stream.closed = True
                     stream.unprocessed_packets.put(SHUTDOWN)
                 else:
-                    assert not stream.closed
+                    if stream.closed:
+                        self._debug_print(f"Received packet for closed stream {stream}")
+                        self._send_error_reply(packet, f"stream {stream} is closed")
+                        continue
                     stream.unprocessed_packets.put(packet)
-        except (ConnectionClosedError, OSError):
-            pass
+        except (ConnectionClosedError, OSError) as exc:
+            if self.running:
+                print(
+                    f"Reader loop exiting: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
         finally:
             if self.running:
                 self.close()
 
+    def _send_error_reply(self, packet: Packet, message: str) -> None:
+        """Send an error reply for a request that can't be delivered.
+
+        Only sends a reply for request packets (not replies). If the write
+        fails (e.g. connection is closing), the error is silently ignored.
+        """
+        if packet.is_reply:
+            return
+        try:
+            error_payload = cbor2.dumps({"error": message, "type": "ProtocolError"})
+            self.write_packet(
+                Packet(
+                    stream_id=packet.stream_id,
+                    message_id=packet.message_id,
+                    is_reply=True,
+                    payload=error_payload,
+                )
+            )
+        except (OSError, ConnectionClosedError):
+            pass
+
     def write_packet(self, packet: Packet) -> None:
         with self.__writer_lock:
+            if not self.running:
+                raise ConnectionError("Connection closed")
             self._debug_packet(packet, direction="SEND")
             write_packet(self.__socket, packet)
 
     def receive_handshake(self):
-        assert not self._handshake_done
+        if self._handshake_done:
+            raise ProtocolError("Handshake already completed")
 
-        self._handshake_done = True
         packet = self.control_stream.read_request()
-        assert packet.payload == HANDSHAKE_STRING
+        if packet.payload != HANDSHAKE_STRING:
+            raise ProtocolError(
+                f"Bad handshake: expected {HANDSHAKE_STRING!r}, got {packet.payload!r}"
+            )
         # we expect the payload to be pure ASCII. ASCII and utf-8 overlap, so passing
         # "ascii" as the encoding is equivalent in the standard case, but gives us a
         # fail-fast error otherwise.
         self.control_stream.write_reply_bytes(
             packet.message_id, f"Hegel/{PROTOCOL_VERSION}".encode("ascii")
         )
+        self._handshake_done = True
 
     def _make_stream(self, stream_id: StreamId, *, role: str | None = None) -> "Stream":
         """Create and register a stream."""
@@ -206,14 +264,18 @@ class Connection:
 
         stream = Stream(connection=self, stream_id=stream_id, role=role)
         with self.__writer_lock:
+            if stream.stream_id in self.streams:
+                raise ProtocolError(f"Stream {stream.stream_id} is already registered")
             self.streams[stream.stream_id] = stream
         return stream
 
     def new_stream(self, *, role: str | None = None) -> "Stream":
-        assert self._handshake_done
+        if not self._handshake_done:
+            raise ProtocolError("Cannot create streams before handshake")
         # server streams get even ids
-        stream_id = StreamId(self.__next_stream_id << 1)
-        self.__next_stream_id += 1
+        with self.__writer_lock:
+            stream_id = StreamId(self.__next_stream_id << 1)
+            self.__next_stream_id += 1
         return self._make_stream(stream_id, role=role)
 
     def register_client_stream(
@@ -230,8 +292,10 @@ class Connection:
         been created by the client or the server. This method's name explicitly mentions
         the client origin for protocol hygiene, not because it has a fundamental impact.
         """
-        assert self._handshake_done
-        assert stream_id not in self.streams
-        # client streams have odd ids
-        assert stream_id & 1 == 1
+        if not self._handshake_done:
+            raise ProtocolError("Cannot register streams before handshake")
+        if stream_id in self.streams:
+            raise ProtocolError(f"Stream {stream_id} is already registered")
+        if stream_id & 1 != 1:
+            raise ProtocolError(f"Client stream id must be odd, got {stream_id}")
         return self._make_stream(stream_id, role=role)

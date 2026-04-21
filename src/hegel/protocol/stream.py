@@ -1,5 +1,7 @@
+import sys
 from collections import deque
 from queue import Empty, SimpleQueue
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import cbor2
@@ -13,6 +15,7 @@ from hegel.protocol.utils import (
     SHUTDOWN,
     STREAM_TIMEOUT,
     MessageId,
+    ProtocolError,
     RequestError,
     StreamId,
 )
@@ -62,7 +65,10 @@ class Stream:
         stream_id: StreamId,
         role: str | None = None,
     ) -> None:
-        assert stream_id > 0 or role == "Control"
+        if stream_id <= 0 and role != "Control":
+            raise ProtocolError(
+                f"Stream id must be positive (got {stream_id}), or role must be 'Control'"
+            )
 
         self.connection = connection
         self.stream_id = stream_id
@@ -73,6 +79,8 @@ class Stream:
         self.replies: dict[MessageId, Packet] = {}
 
         self.next_message_id = MessageId(1)
+        self._write_lock = Lock()
+        self._close_lock = Lock()
         self.closed = False
 
     def __repr__(self):
@@ -84,10 +92,10 @@ class Stream:
 
     def close(self):
         """Close this stream. Writes a close stream notification packet to the socket."""
-        if self.closed:
-            return
-
-        self.closed = True
+        with self._close_lock:
+            if self.closed:
+                return
+            self.closed = True
         self.unprocessed_packets.put(SHUTDOWN)
         if self.connection.running:
             self.connection.write_packet(
@@ -117,7 +125,11 @@ class Stream:
             raise ConnectionError("Connection closed")
 
         if packet.is_reply:
-            assert packet.message_id not in self.replies
+            if packet.message_id in self.replies:
+                print(
+                    f"Duplicate reply for message_id {packet.message_id} on {self!r}",
+                    file=sys.stderr,
+                )
             self.replies[packet.message_id] = packet
         else:
             self.requests.append(packet)
@@ -147,15 +159,15 @@ class Stream:
 
     def write_request(self, payload: bytes) -> Packet:
         """Write a request packet to the socket. Returns the packet."""
-        assert isinstance(payload, bytes)
-        packet = Packet(
-            payload=payload,
-            stream_id=self.stream_id,
-            is_reply=False,
-            message_id=self.next_message_id,
-        )
-        self.connection.write_packet(packet)
-        self.next_message_id = MessageId(self.next_message_id + 1)
+        with self._write_lock:
+            packet = Packet(
+                payload=payload,
+                stream_id=self.stream_id,
+                is_reply=False,
+                message_id=self.next_message_id,
+            )
+            self.connection.write_packet(packet)
+            self.next_message_id = MessageId(self.next_message_id + 1)
         return packet
 
     def write_reply(self, message_id: MessageId, value: Any) -> None:
@@ -174,7 +186,6 @@ class Stream:
 
     def write_reply_bytes(self, message_id: MessageId, payload: bytes) -> None:
         """Write a reply packet to the socket."""
-        assert isinstance(payload, bytes)
         self.connection.write_packet(
             Packet(
                 payload=payload,

@@ -468,3 +468,144 @@ class TestTestServerErrors:
             t.join(timeout=5.0)
             assert len(errors) == 1
             assert "nonexistent_mode" in str(errors[0])
+
+
+class TestTestServerCommandValidation:
+    def test_non_run_test_command_raises(self):
+        """Test that sending a non-run_test command raises ValueError."""
+        s1, s2 = _create_socket_pair()
+        errors = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "empty_test")
+            except ValueError as e:
+                errors.append(e)
+
+        t = Thread(target=run, daemon=True)
+        t.start()
+
+        with _setup_client(s2) as conn:
+            conn.control_stream.write_request(
+                cbor2.dumps({"command": "bogus"}),
+            )
+
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "Expected run_test" in str(errors[0])
+
+    def test_non_generate_command_raises_in_handle_normal_generate(self):
+        """Test _handle_normal_generate raises when client sends wrong command."""
+        s1, s2 = _create_socket_pair()
+        errors = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "stop_test_on_generate")
+            except ValueError as e:
+                errors.append(e)
+
+        t = Thread(target=run, daemon=True)
+        t.start()
+
+        with _setup_client(s2) as conn:
+            test_stream = _send_run_test(conn)
+            data_ch1, _ = _receive_test_case(test_stream, conn)
+            data_ch1.write_request(
+                cbor2.dumps(
+                    {"command": "mark_complete", "status": "VALID", "origin": None}
+                ),
+            )
+
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "Expected generate" in str(errors[0])
+
+    def test_non_mark_complete_command_raises_in_wait_for_mark_complete(self):
+        """Test _wait_for_mark_complete raises when client sends wrong command."""
+        s1, s2 = _create_socket_pair()
+        errors = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "stop_test_on_mark_complete")
+            except ValueError as e:
+                errors.append(e)
+
+        t = Thread(target=run, daemon=True)
+        t.start()
+
+        with _setup_client(s2) as conn:
+            test_stream = _send_run_test(conn)
+            data_ch, _ = _receive_test_case(test_stream, conn)
+            _send_generate(data_ch)
+            data_ch.write_request(
+                cbor2.dumps({"command": "generate", "schema": {"type": "boolean"}}),
+            )
+
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "Expected mark_complete" in str(errors[0])
+
+    def test_non_generate_in_stop_test_mode_second_test_case(self):
+        """Test _mode_stop_test_on_generate raises for wrong command on 2nd test case."""
+        s1, s2 = _create_socket_pair()
+        errors = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "stop_test_on_generate")
+            except ValueError as e:
+                errors.append(e)
+
+        t = Thread(target=run, daemon=True)
+        t.start()
+
+        with _setup_client(s2) as conn:
+            test_stream = _send_run_test(conn)
+            data_ch1, _ = _receive_test_case(test_stream, conn)
+            _send_generate(data_ch1)
+            _send_mark_complete(data_ch1)
+
+            data_ch2, _ = _receive_test_case(test_stream, conn)
+            data_ch2.write_request(
+                cbor2.dumps(
+                    {"command": "mark_complete", "status": "VALID", "origin": None}
+                ),
+            )
+
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "Expected generate" in str(errors[0])
+
+    def test_non_generate_in_error_response_mode(self):
+        """Test _mode_error_response raises for wrong command."""
+        s1, s2 = _create_socket_pair()
+        errors = []
+
+        def run():
+            conn = Connection(s1)
+            try:
+                run_test_server(conn, "error_response")
+            except ValueError as e:
+                errors.append(e)
+
+        t = Thread(target=run, daemon=True)
+        t.start()
+
+        with _setup_client(s2) as conn:
+            test_stream = _send_run_test(conn)
+            data_ch, _ = _receive_test_case(test_stream, conn)
+            data_ch.write_request(
+                cbor2.dumps(
+                    {"command": "mark_complete", "status": "VALID", "origin": None}
+                ),
+            )
+
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "Expected generate" in str(errors[0])

@@ -9,7 +9,7 @@ import pytest
 
 from hegel.protocol import Connection, Packet, RequestError
 from hegel.protocol.connection import PROTOCOL_VERSION
-from hegel.protocol.utils import SHUTDOWN
+from hegel.protocol.utils import SHUTDOWN, ProtocolError
 from tests.client import ClientConnection
 
 
@@ -79,6 +79,13 @@ def test_handle_requests_until(socket_pair):
 def test_connection_debug_mode(socket, name, payload):
     with Connection(socket, name=name, debug=True) as conn:
         packet = Packet(stream_id=0, message_id=1, is_reply=False, payload=payload)
+        conn._debug_packet(packet, direction="TEST")
+
+
+def test_connection_debug_unknown_stream(socket):
+    """_debug_packet handles packets for unknown stream_ids without crashing."""
+    with Connection(socket, name="Dbg", debug=True) as conn:
+        packet = Packet(stream_id=9999, message_id=1, is_reply=False, payload=b"hello")
         conn._debug_packet(packet, direction="TEST")
 
 
@@ -198,8 +205,14 @@ def test_stream_repr_variations(socket_pair, role, expected):
         assert expected in repr(stream)
 
 
-def test_message_to_closed_stream(socket_pair):
-    """Test sending a message to a closed stream."""
+def test_request_to_closed_stream_gets_error_reply(socket_pair):
+    """Sending a request to a server-closed stream gets an error reply.
+
+    The server must not crash, and the client receives a ProtocolError so
+    it fails fast rather than hanging.
+    """
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, read_packet
+
     server_socket, client_socket = socket_pair
     with (
         Connection(server_socket) as server_conn,
@@ -210,13 +223,174 @@ def test_message_to_closed_stream(socket_pair):
         ch_server = server_conn.new_stream()
         ch_client = client_conn.connect_stream(ch_server.stream_id)
 
-        # Close the stream on server side
         ch_server.close()
         time.sleep(0.2)
 
-        # Now send a request to the closed stream from client
-        ch_client.write_request(cbor2.dumps({"test": "data"}))
+        packet = ch_client.write_request(cbor2.dumps({"test": "data"}))
+
+        # Skip the close notification packet, find our error reply.
+        while True:
+            reply = read_packet(client_socket, timeout=2.0)
+            if reply.payload == CLOSE_STREAM_PAYLOAD:
+                continue
+            if reply.is_reply and reply.message_id == packet.message_id:
+                break
+
+        assert reply.stream_id == ch_server.stream_id
+        body = cbor2.loads(reply.payload)
+        assert "error" in body
+        assert body["type"] == "ProtocolError"
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_request_for_unknown_stream_gets_error_reply(socket_pair):
+    """A request on an unregistered stream_id gets an error reply.
+
+    The server must not crash, and the client must receive a ProtocolError
+    reply so it fails fast rather than hanging.
+    """
+    from hegel.protocol.packet import read_packet, write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        bogus_stream_id = 9999
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=bogus_stream_id,
+                message_id=1,
+                is_reply=False,
+                payload=cbor2.dumps({"bad": True}),
+            ),
+        )
+
+        reply = read_packet(client_socket, timeout=2.0)
+        assert reply.stream_id == bogus_stream_id
+        assert reply.message_id == 1
+        assert reply.is_reply
+        body = cbor2.loads(reply.payload)
+        assert "error" in body
+        assert body["type"] == "ProtocolError"
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+        # Other streams still work.
+        ch_server = server_conn.new_stream()
+        ch_client = client_conn.connect_stream(ch_server.stream_id)
+
+        def server_handler():
+            @ch_server.handle_requests
+            def _(message):
+                return {"echo": message}
+
+        t = Thread(target=server_handler, daemon=True)
+        t.start()
+        assert ch_client.send_request({"ping": 1}) == {"echo": {"ping": 1}}
+
+
+def test_reply_for_unknown_stream_is_silently_discarded(socket_pair):
+    """A reply packet on an unregistered stream is discarded with no response."""
+    from hegel.protocol.packet import write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=9999,
+                message_id=1,
+                is_reply=True,
+                payload=cbor2.dumps({"result": "stale"}),
+            ),
+        )
         time.sleep(0.2)
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_error_reply_write_failure_is_suppressed(socket_pair):
+    """If sending the error reply fails (e.g. connection closing), the reader
+    loop continues without crashing."""
+    from hegel.protocol.packet import write_packet as _write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        orig_write = server_conn.write_packet
+
+        def failing_write(packet):
+            if packet.is_reply and packet.stream_id == 9999:
+                raise OSError("simulated write failure")
+            orig_write(packet)
+
+        server_conn.write_packet = failing_write
+
+        _write_packet(
+            client_socket,
+            Packet(
+                stream_id=9999,
+                message_id=1,
+                is_reply=False,
+                payload=cbor2.dumps({"bad": True}),
+            ),
+        )
+        time.sleep(0.2)
+
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
+
+
+def test_close_packet_with_wrong_message_id_is_discarded(socket_pair):
+    """A close-stream payload with the wrong message_id is silently discarded.
+
+    The reader loop must not crash with an AssertionError; the connection stays
+    alive.
+    """
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, write_packet
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        ch_client = client_conn.new_stream()
+        server_conn.register_client_stream(ch_client.stream_id)
+
+        # Send a close-stream payload but with the wrong message_id.
+        write_packet(
+            client_socket,
+            Packet(
+                stream_id=ch_client.stream_id,
+                message_id=42,  # wrong — should be CLOSE_STREAM_MESSAGE_ID
+                is_reply=False,
+                payload=CLOSE_STREAM_PAYLOAD,
+            ),
+        )
+        time.sleep(0.2)
+
+        # The connection must still be alive.
+        assert server_conn.running
+        assert server_conn._reader_thread.is_alive()
 
 
 @pytest.mark.parametrize("create_stream_first", [False, True])
@@ -406,21 +580,20 @@ def test_duplicate_reply_id_raises(socket):
         assert result == b"a"
 
 
-def test_duplicate_reply_error(socket):
-    """Test that duplicate replies for same ID raises AssertionError."""
+def test_duplicate_reply_warns_on_stderr(socket, capsys):
+    """Duplicate replies for same ID print a warning instead of crashing."""
     with Connection(socket) as conn:
         stream = conn.control_stream
 
-        # Put a reply in the replies dict directly
         stream.replies[42] = b"first"
 
-        # Now try to process another reply with same ID
         stream.unprocessed_packets.put(
             Packet(stream_id=0, message_id=42, is_reply=True, payload=b"second")
         )
 
-        with pytest.raises(AssertionError):
-            stream._Stream__read_one_packet()
+        stream._Stream__read_one_packet()
+        captured = capsys.readouterr()
+        assert "Duplicate reply for message_id 42" in captured.err
 
 
 # ---- Connection handshake ----
@@ -436,7 +609,7 @@ def test_double_handshake_receive_raises(socket_pair):
 
         def server_side():
             server_conn.receive_handshake()
-            with pytest.raises(AssertionError):
+            with pytest.raises(ProtocolError, match="Handshake already completed"):
                 server_conn.receive_handshake()
 
         t = Thread(target=server_side, daemon=True)
@@ -449,7 +622,7 @@ def test_connect_stream_before_handshake_raises(socket):
     """Test that connect_stream before handshake raises."""
     with (
         Connection(socket) as conn,
-        pytest.raises(AssertionError),
+        pytest.raises(ProtocolError, match="Cannot register streams before handshake"),
     ):
         conn.register_client_stream(1)
 
@@ -464,7 +637,7 @@ def test_connect_stream_already_exists_raises(socket_pair):
         _do_handshake(server_conn, client_conn)
 
         # Connect to stream 0 which already exists (control stream)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ProtocolError, match="already registered"):
             server_conn.register_client_stream(0)
 
 
@@ -472,13 +645,35 @@ def test_new_stream_before_handshake_raises(socket):
     """Test that new_stream before handshake raises."""
     with (
         Connection(socket) as conn,
-        pytest.raises(AssertionError),
+        pytest.raises(ProtocolError, match="Cannot create streams before handshake"),
     ):
         conn.new_stream()
 
 
+def test_make_stream_duplicate_raises(socket):
+    """Test that _make_stream rejects a duplicate stream id."""
+    with Connection(socket) as conn:
+        conn._handshake_done = True
+        conn._make_stream(1, role="First")
+        with pytest.raises(ProtocolError, match="already registered"):
+            conn._make_stream(1, role="Duplicate")
+
+
+def test_register_client_stream_even_id_raises(socket_pair):
+    """Test that registering a client stream with an even id raises."""
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        with pytest.raises(ProtocolError, match="Client stream id must be odd"):
+            server_conn.register_client_stream(2)
+
+
 def test_bad_handshake_negotiation(socket_pair):
-    """Test handshake with bad version string asserts."""
+    """Test handshake with bad version string raises."""
     server_socket, client_socket = socket_pair
     with (
         Connection(server_socket) as server_conn,
@@ -492,7 +687,7 @@ def test_bad_handshake_negotiation(socket_pair):
         t = Thread(target=send_bad, daemon=True)
         t.start()
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(ProtocolError, match="Bad handshake"):
             server_conn.receive_handshake()
 
         t.join(timeout=5)
@@ -618,6 +813,319 @@ def test_reader_loop_graceful_exit_on_remote_close(socket_pair):
     finally:
         threading.excepthook = original_excepthook
         server_conn.close()
+
+
+def test_stream_close_emits_exactly_one_close_packet(socket_pair):
+    """Regression: Stream.close() is check-then-set on self.closed, so N
+    concurrent callers could all pass the guard and each emit a CLOSE_STREAM
+    packet. The peer must see exactly one.
+
+    The race is between two bytecodes and the GIL scheduler does not reliably
+    preempt there, so we force a yield point by swapping in a subclass whose
+    ``closed`` is a property that blocks on a Barrier while its value is False.
+    """
+    import threading as _threading
+
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD
+    from hegel.protocol.stream import Stream
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+        stream = server_conn.new_stream()
+
+        n_workers = 16
+        check_barrier = _threading.Barrier(n_workers)
+        closed_box = [False]
+
+        class RaceyStream(Stream):
+            @property
+            def closed(self):
+                val = closed_box[0]
+                if not val:
+                    try:
+                        check_barrier.wait(timeout=2.0)
+                    except _threading.BrokenBarrierError:
+                        pass
+                return val
+
+            @closed.setter
+            def closed(self, value):
+                closed_box[0] = value
+
+        # Property on the class takes precedence over the instance attribute,
+        # but strip the stale instance attribute for clarity.
+        stream.__dict__.pop("closed", None)
+        stream.__class__ = RaceyStream
+
+        close_packet_count = 0
+        count_lock = _threading.Lock()
+        orig_write_packet = server_conn.write_packet
+
+        def counting_write_packet(packet):
+            nonlocal close_packet_count
+            if (
+                packet.payload == CLOSE_STREAM_PAYLOAD
+                and packet.stream_id == stream.stream_id
+            ):
+                with count_lock:
+                    close_packet_count += 1
+            orig_write_packet(packet)
+
+        server_conn.write_packet = counting_write_packet
+
+        def worker():
+            stream.close()
+
+        threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert close_packet_count == 1
+
+
+def test_connection_close_body_runs_once(socket_pair):
+    """Regression: Connection.close() is check-then-set on self.running, so N
+    concurrent callers could all pass the guard and each enqueue SHUTDOWN on
+    every stream. SHUTDOWN must be enqueued exactly once per stream.
+
+    As with Stream.close, we force a yield point by swapping in a subclass
+    whose ``running`` is a property that blocks on a Barrier while True.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+    client_conn = ClientConnection(client_socket)
+    _do_handshake(server_conn, client_conn)
+    server_conn.new_stream()
+
+    n_workers = 16
+    check_barrier = _threading.Barrier(n_workers)
+    running_box = [True]
+
+    class RaceyConnection(Connection):
+        @property
+        def running(self):
+            val = running_box[0]
+            if val:
+                try:
+                    check_barrier.wait(timeout=2.0)
+                except _threading.BrokenBarrierError:
+                    pass
+            return val
+
+        @running.setter
+        def running(self, value):
+            running_box[0] = value
+
+    server_conn.__dict__.pop("running", None)
+    server_conn.__class__ = RaceyConnection
+
+    put_count = 0
+    count_lock = _threading.Lock()
+    real_q = server_conn.control_stream.unprocessed_packets
+
+    class CountingQueue:
+        def put(self, item):
+            if item is SHUTDOWN:
+                nonlocal put_count
+                with count_lock:
+                    put_count += 1
+            real_q.put(item)
+
+        def get(self, *args, **kwargs):
+            return real_q.get(*args, **kwargs)
+
+    server_conn.control_stream.unprocessed_packets = CountingQueue()
+
+    def worker():
+        server_conn.close()
+
+    threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    client_conn.close()
+
+    assert put_count == 1
+
+
+def test_close_tolerates_concurrent_new_stream(socket_pair):
+    """Regression: Connection.close() must not raise when a new stream is added
+    concurrently (previously iterated ``self.streams`` without the writer lock,
+    which could raise 'dictionary changed size during iteration').
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+    client_conn = ClientConnection(client_socket)
+    _do_handshake(server_conn, client_conn)
+    # A couple of streams so close() has something to iterate over.
+    server_conn.new_stream()
+    server_conn.new_stream()
+
+    # Block close()'s iteration inside the body so we have a window in which
+    # to mutate the streams dict from another thread.
+    first_stream = next(iter(server_conn.streams.values()))
+    iter_entered = _threading.Event()
+    release_iter = _threading.Event()
+    real_queue = first_stream.unprocessed_packets
+
+    class HookedQueue:
+        def put(self, item):
+            iter_entered.set()
+            release_iter.wait(timeout=5.0)
+            real_queue.put(item)
+
+        def get(self, *args, **kwargs):
+            return real_queue.get(*args, **kwargs)
+
+    first_stream.unprocessed_packets = HookedQueue()
+
+    errors = []
+
+    def closer():
+        try:
+            server_conn.close()
+        except Exception as e:
+            errors.append(("close", e))
+
+    def creator():
+        iter_entered.wait(timeout=5.0)
+        try:
+            server_conn.new_stream()
+        except Exception as e:
+            errors.append(("new_stream", e))
+        release_iter.set()
+
+    t_close = Thread(target=closer, daemon=True)
+    t_create = Thread(target=creator, daemon=True)
+    t_close.start()
+    t_create.start()
+    t_close.join(timeout=10)
+    t_create.join(timeout=10)
+
+    client_conn.close()
+
+    assert errors == []
+
+
+def test_write_request_concurrent_message_ids_unique(socket_pair):
+    """Concurrent write_request on the same stream must produce unique message IDs.
+
+    Regression test: the read-modify-write of ``Stream.next_message_id`` used
+    to be non-atomic, so two concurrent calls could both observe the same id
+    and emit two packets with the same message_id.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+        stream = server_conn.new_stream()
+
+        n_workers = 8
+        barrier = _threading.Barrier(n_workers)
+        orig_write_packet = server_conn.write_packet
+
+        def patched_write_packet(packet):
+            # Force all workers to sit here with their message_id already read
+            # from self.next_message_id. Under the bug they all captured the
+            # same value; under the fix only one worker can be mid-write at a
+            # time, so the first arrival times out the barrier and the rest
+            # proceed through the (now broken) barrier immediately.
+            try:
+                barrier.wait(timeout=0.5)
+            except _threading.BrokenBarrierError:
+                pass
+            orig_write_packet(packet)
+
+        server_conn.write_packet = patched_write_packet
+
+        results = []
+        results_lock = _threading.Lock()
+
+        def worker():
+            packet = stream.write_request(cbor2.dumps({"n": 1}))
+            with results_lock:
+                results.append(packet.message_id)
+
+        threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(results) == n_workers
+        assert len(set(results)) == n_workers
+
+
+def test_stream_constructor_rejects_non_control_stream_id_zero(socket):
+    """Test that creating a stream with id 0 and non-Control role raises."""
+    from hegel.protocol.stream import Stream
+
+    with (
+        Connection(socket) as conn,
+        pytest.raises(ProtocolError, match="Stream id must be positive"),
+    ):
+        Stream(connection=conn, stream_id=0, role="NotControl")
+
+
+def test_write_packet_after_close_raises(socket):
+    """Test that write_packet raises ConnectionError after close."""
+    conn = Connection(socket)
+    conn.close()
+    with pytest.raises(ConnectionError, match="Connection closed"):
+        conn.write_packet(
+            Packet(stream_id=0, message_id=1, is_reply=False, payload=b"test")
+        )
+
+
+def test_handshake_flag_is_false_until_handshake_completes(socket_pair):
+    """Regression: receive_handshake used to set self._handshake_done = True
+    as its first statement, so the assert in new_stream could pass while
+    the server was still waiting for the client's handshake bytes.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+
+    read_entered = _threading.Event()
+    orig_read_request = server_conn.control_stream.read_request
+
+    def hooked_read_request(*args, **kwargs):
+        read_entered.set()
+        return orig_read_request(*args, **kwargs)
+
+    server_conn.control_stream.read_request = hooked_read_request
+
+    t = Thread(target=server_conn.receive_handshake, daemon=True)
+    t.start()
+    assert read_entered.wait(timeout=2.0)
+
+    with pytest.raises(ProtocolError, match="Cannot create streams before handshake"):
+        server_conn.new_stream()
+
+    client_conn = ClientConnection(client_socket)
+    client_conn.send_handshake()
+    t.join(timeout=5)
+
+    server_conn.new_stream()
+    client_conn.close()
+    server_conn.close()
 
 
 def test_invalid_hegel_debug_env_var():

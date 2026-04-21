@@ -32,8 +32,14 @@ class StdioTransport:
         return data
 
     def sendall(self, data):
-        self._writer.write(data)
-        self._writer.flush()
+        try:
+            self._writer.write(data)
+            self._writer.flush()
+        except ValueError as e:
+            # BufferedWriter raises ValueError("I/O operation on closed file")
+            # but the protocol layer only catches OSError.
+            print(f"StdioTransport write failed: {e}", file=sys.stderr)
+            raise OSError(str(e)) from e
 
     def settimeout(self, timeout):
         pass  # No timeout support for stdio
