@@ -110,7 +110,6 @@ class Connection:
         self.running = True
 
         self.__writer_lock = Lock()
-        self.__close_lock = Lock()
         self.__socket = socket
         self.__next_stream_id = 1
         self._handshake_done = False
@@ -159,14 +158,10 @@ class Connection:
 
     def close(self) -> None:
         """Close the connection and clean up resources."""
-        with self.__close_lock:
+        with self.__writer_lock:
             if not self.running:
                 return
             self.running = False
-
-        # Hold the writer lock while closing the socket so that no
-        # write_packet call can be in flight when the fd is closed.
-        with self.__writer_lock:
             with contextlib.suppress(OSError):
                 self.__socket.shutdown(socket.SHUT_RDWR)
             with contextlib.suppress(OSError):
