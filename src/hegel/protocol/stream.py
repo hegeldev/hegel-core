@@ -1,5 +1,6 @@
 from collections import deque
 from queue import Empty, SimpleQueue
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import cbor2
@@ -73,6 +74,8 @@ class Stream:
         self.replies: dict[MessageId, Packet] = {}
 
         self.next_message_id = MessageId(1)
+        self._write_lock = Lock()
+        self._close_lock = Lock()
         self.closed = False
 
     def __repr__(self):
@@ -84,10 +87,10 @@ class Stream:
 
     def close(self):
         """Close this stream. Writes a close stream notification packet to the socket."""
-        if self.closed:
-            return
-
-        self.closed = True
+        with self._close_lock:
+            if self.closed:
+                return
+            self.closed = True
         self.unprocessed_packets.put(SHUTDOWN)
         if self.connection.running:
             self.connection.write_packet(
@@ -148,14 +151,15 @@ class Stream:
     def write_request(self, payload: bytes) -> Packet:
         """Write a request packet to the socket. Returns the packet."""
         assert isinstance(payload, bytes)
-        packet = Packet(
-            payload=payload,
-            stream_id=self.stream_id,
-            is_reply=False,
-            message_id=self.next_message_id,
-        )
-        self.connection.write_packet(packet)
-        self.next_message_id = MessageId(self.next_message_id + 1)
+        with self._write_lock:
+            packet = Packet(
+                payload=payload,
+                stream_id=self.stream_id,
+                is_reply=False,
+                message_id=self.next_message_id,
+            )
+            self.connection.write_packet(packet)
+            self.next_message_id = MessageId(self.next_message_id + 1)
         return packet
 
     def write_reply(self, message_id: MessageId, value: Any) -> None:

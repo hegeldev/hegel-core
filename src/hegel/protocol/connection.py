@@ -105,6 +105,7 @@ class Connection:
         self.running = True
 
         self.__writer_lock = Lock()
+        self.__close_lock = Lock()
         self.__socket = socket
         self.__next_stream_id = 1
         self._handshake_done = False
@@ -148,16 +149,20 @@ class Connection:
 
     def close(self) -> None:
         """Close the connection and clean up resources."""
-        if not self.running:
-            return
+        with self.__close_lock:
+            if not self.running:
+                return
+            self.running = False
 
-        self.running = False
-        with contextlib.suppress(OSError):
-            self.__socket.shutdown(socket.SHUT_RDWR)
-        with contextlib.suppress(OSError):
-            self.__socket.close()
-
-        for v in self.streams.values():
+        # Hold the writer lock while closing the socket so that no
+        # write_packet call can be in flight when the fd is closed.
+        with self.__writer_lock:
+            with contextlib.suppress(OSError):
+                self.__socket.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                self.__socket.close()
+            streams = list(self.streams.values())
+        for v in streams:
             if not v.closed:
                 v.unprocessed_packets.put(SHUTDOWN)
 
@@ -184,6 +189,8 @@ class Connection:
 
     def write_packet(self, packet: Packet) -> None:
         with self.__writer_lock:
+            if not self.running:
+                raise ConnectionError("Connection closed")
             self._debug_packet(packet, direction="SEND")
             write_packet(self.__socket, packet)
 
@@ -212,8 +219,9 @@ class Connection:
     def new_stream(self, *, role: str | None = None) -> "Stream":
         assert self._handshake_done
         # server streams get even ids
-        stream_id = StreamId(self.__next_stream_id << 1)
-        self.__next_stream_id += 1
+        with self.__writer_lock:
+            stream_id = StreamId(self.__next_stream_id << 1)
+            self.__next_stream_id += 1
         return self._make_stream(stream_id, role=role)
 
     def register_client_stream(

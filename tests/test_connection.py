@@ -620,6 +620,273 @@ def test_reader_loop_graceful_exit_on_remote_close(socket_pair):
         server_conn.close()
 
 
+def test_stream_close_emits_exactly_one_close_packet(socket_pair):
+    """Regression: Stream.close() is check-then-set on self.closed, so N
+    concurrent callers could all pass the guard and each emit a CLOSE_STREAM
+    packet. The peer must see exactly one.
+
+    The race is between two bytecodes and the GIL scheduler does not reliably
+    preempt there, so we force a yield point by swapping in a subclass whose
+    ``closed`` is a property that blocks on a Barrier while its value is False.
+    """
+    import threading as _threading
+
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD
+    from hegel.protocol.stream import Stream
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+        stream = server_conn.new_stream()
+
+        n_workers = 16
+        check_barrier = _threading.Barrier(n_workers)
+        closed_box = [False]
+
+        class RaceyStream(Stream):
+            @property
+            def closed(self):
+                val = closed_box[0]
+                if not val:
+                    try:
+                        check_barrier.wait(timeout=2.0)
+                    except _threading.BrokenBarrierError:
+                        pass
+                return val
+
+            @closed.setter
+            def closed(self, value):
+                closed_box[0] = value
+
+        # Property on the class takes precedence over the instance attribute,
+        # but strip the stale instance attribute for clarity.
+        stream.__dict__.pop("closed", None)
+        stream.__class__ = RaceyStream
+
+        close_packet_count = 0
+        count_lock = _threading.Lock()
+        orig_write_packet = server_conn.write_packet
+
+        def counting_write_packet(packet):
+            nonlocal close_packet_count
+            if (
+                packet.payload == CLOSE_STREAM_PAYLOAD
+                and packet.stream_id == stream.stream_id
+            ):
+                with count_lock:
+                    close_packet_count += 1
+            orig_write_packet(packet)
+
+        server_conn.write_packet = counting_write_packet
+
+        def worker():
+            stream.close()
+
+        threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert close_packet_count == 1
+
+
+def test_connection_close_body_runs_once(socket_pair):
+    """Regression: Connection.close() is check-then-set on self.running, so N
+    concurrent callers could all pass the guard and each enqueue SHUTDOWN on
+    every stream. SHUTDOWN must be enqueued exactly once per stream.
+
+    As with Stream.close, we force a yield point by swapping in a subclass
+    whose ``running`` is a property that blocks on a Barrier while True.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+    client_conn = ClientConnection(client_socket)
+    _do_handshake(server_conn, client_conn)
+    server_conn.new_stream()
+
+    n_workers = 16
+    check_barrier = _threading.Barrier(n_workers)
+    running_box = [True]
+
+    class RaceyConnection(Connection):
+        @property
+        def running(self):
+            val = running_box[0]
+            if val:
+                try:
+                    check_barrier.wait(timeout=2.0)
+                except _threading.BrokenBarrierError:
+                    pass
+            return val
+
+        @running.setter
+        def running(self, value):
+            running_box[0] = value
+
+    server_conn.__dict__.pop("running", None)
+    server_conn.__class__ = RaceyConnection
+
+    put_count = 0
+    count_lock = _threading.Lock()
+    real_q = server_conn.control_stream.unprocessed_packets
+
+    class CountingQueue:
+        def put(self, item):
+            if item is SHUTDOWN:
+                nonlocal put_count
+                with count_lock:
+                    put_count += 1
+            real_q.put(item)
+
+        def get(self, *args, **kwargs):
+            return real_q.get(*args, **kwargs)
+
+    server_conn.control_stream.unprocessed_packets = CountingQueue()
+
+    def worker():
+        server_conn.close()
+
+    threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    client_conn.close()
+
+    assert put_count == 1
+
+
+def test_close_tolerates_concurrent_new_stream(socket_pair):
+    """Regression: Connection.close() must not raise when a new stream is added
+    concurrently (previously iterated ``self.streams`` without the writer lock,
+    which could raise 'dictionary changed size during iteration').
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+    client_conn = ClientConnection(client_socket)
+    _do_handshake(server_conn, client_conn)
+    # A couple of streams so close() has something to iterate over.
+    server_conn.new_stream()
+    server_conn.new_stream()
+
+    # Block close()'s iteration inside the body so we have a window in which
+    # to mutate the streams dict from another thread.
+    first_stream = next(iter(server_conn.streams.values()))
+    iter_entered = _threading.Event()
+    release_iter = _threading.Event()
+    real_queue = first_stream.unprocessed_packets
+
+    class HookedQueue:
+        def put(self, item):
+            iter_entered.set()
+            release_iter.wait(timeout=5.0)
+            real_queue.put(item)
+
+        def get(self, *args, **kwargs):
+            return real_queue.get(*args, **kwargs)
+
+    first_stream.unprocessed_packets = HookedQueue()
+
+    errors = []
+
+    def closer():
+        try:
+            server_conn.close()
+        except Exception as e:
+            errors.append(("close", e))
+
+    def creator():
+        iter_entered.wait(timeout=5.0)
+        try:
+            server_conn.new_stream()
+        except Exception as e:
+            errors.append(("new_stream", e))
+        release_iter.set()
+
+    t_close = Thread(target=closer, daemon=True)
+    t_create = Thread(target=creator, daemon=True)
+    t_close.start()
+    t_create.start()
+    t_close.join(timeout=10)
+    t_create.join(timeout=10)
+
+    client_conn.close()
+
+    assert errors == []
+
+
+def test_write_request_concurrent_message_ids_unique(socket_pair):
+    """Concurrent write_request on the same stream must produce unique message IDs.
+
+    Regression test: the read-modify-write of ``Stream.next_message_id`` used
+    to be non-atomic, so two concurrent calls could both observe the same id
+    and emit two packets with the same message_id.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+        stream = server_conn.new_stream()
+
+        n_workers = 8
+        barrier = _threading.Barrier(n_workers)
+        orig_write_packet = server_conn.write_packet
+
+        def patched_write_packet(packet):
+            # Force all workers to sit here with their message_id already read
+            # from self.next_message_id. Under the bug they all captured the
+            # same value; under the fix only one worker can be mid-write at a
+            # time, so the first arrival times out the barrier and the rest
+            # proceed through the (now broken) barrier immediately.
+            try:
+                barrier.wait(timeout=0.5)
+            except _threading.BrokenBarrierError:
+                pass
+            orig_write_packet(packet)
+
+        server_conn.write_packet = patched_write_packet
+
+        results = []
+        results_lock = _threading.Lock()
+
+        def worker():
+            packet = stream.write_request(cbor2.dumps({"n": 1}))
+            with results_lock:
+                results.append(packet.message_id)
+
+        threads = [Thread(target=worker, daemon=True) for _ in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(results) == n_workers
+        assert len(set(results)) == n_workers
+
+
+def test_write_packet_after_close_raises(socket):
+    """Test that write_packet raises ConnectionError after close."""
+    conn = Connection(socket)
+    conn.close()
+    with pytest.raises(ConnectionError, match="Connection closed"):
+        conn.write_packet(
+            Packet(stream_id=0, message_id=1, is_reply=False, payload=b"test")
+        )
+
+
 def test_invalid_hegel_debug_env_var():
     result = subprocess.run(
         [
