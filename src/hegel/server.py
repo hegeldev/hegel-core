@@ -22,6 +22,11 @@ from hypothesis.errors import (
 )
 from hypothesis.internal.conjecture.data import ConjectureData, DataObserver, Status
 from hypothesis.internal.conjecture.engine import ConjectureRunner, ExitReason
+from hypothesis.internal.conjecture.providers import (
+    HypothesisProvider,
+    URandom,
+    URandomProvider,
+)
 from hypothesis.internal.conjecture.shrinker import sort_key
 from hypothesis.internal.conjecture.utils import calc_label_from_name, many
 
@@ -373,41 +378,33 @@ def _single_test_case(
     with is_final=True. No shrinking, no replay, no exploration.
     """
     try:
-        seed = random.getrandbits(128) if seed is None else seed
+        antithesis = os.environ.get("ANTITHESIS_OUTPUT_DIR")
+        if antithesis:
+            rng: Random = URandom()
+        else:
+            seed = random.getrandbits(128) if seed is None else seed
+            rng = Random(seed)
 
-        state = HegelState(connection, stream, is_final=True)
-        runner = ConjectureRunner(
-            state.test_function,
-            settings=settings(
-                deadline=None,
-                max_examples=1,
-                backend=(
-                    "hypothesis-urandom"
-                    if os.environ.get("ANTITHESIS_OUTPUT_DIR")
-                    else "hypothesis"
-                ),
-            ),
-            random=Random(seed),
-            database_key=None,
-        )
-        data = runner.new_conjecture_data(
-            [], observer=DataObserver(), max_choices=2**64
+        data = ConjectureData(
+            random=rng,
+            observer=DataObserver(),
+            provider=URandomProvider if antithesis else HypothesisProvider,
+            max_choices=2**64,
         )
         data.max_length = 2**64
+
+        state = HegelState(connection, stream, is_final=True)
         with contextlib.suppress(StopTest):
             state.test_function(data)
         data.freeze()
 
-        is_interesting = data.status is Status.INTERESTING
-        is_valid = data.status is Status.VALID
-        is_invalid = data.status is Status.INVALID
         result: dict[str, Any] = {
-            "passed": not is_interesting,
+            "passed": data.status is not Status.INTERESTING,
             "test_cases": 1,
-            "valid_test_cases": int(is_valid),
-            "invalid_test_cases": int(is_invalid),
-            "interesting_test_cases": int(is_interesting),
-            "seed": str(seed),
+            "valid_test_cases": int(data.status is Status.VALID),
+            "invalid_test_cases": int(data.status is Status.INVALID),
+            "interesting_test_cases": int(data.status is Status.INTERESTING),
+            "seed": str(seed) if not antithesis else None,
             "failure_blobs": [],
         }
         stream.send_request({"event": "test_done", "results": result}).get()
