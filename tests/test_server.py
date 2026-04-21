@@ -925,7 +925,7 @@ def test_one_shot_runs_single_passing_case(client):
         call_count[0] += 1
         generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
 
-    client.run_test(test, one_shot=True)
+    client.one_shot(test)
 
     assert call_count[0] == 1
     assert client.last_result["test_cases"] == 1
@@ -943,7 +943,7 @@ def test_one_shot_is_final(client):
     def test():
         seen_is_final.append(_is_final.get())
 
-    client.run_test(test, one_shot=True)
+    client.one_shot(test)
     assert seen_is_final == [True]
 
 
@@ -951,7 +951,7 @@ def test_one_shot_invalid_assume(client):
     def test():
         assume(False)
 
-    client.run_test(test, one_shot=True)
+    client.one_shot(test)
 
     assert client.last_result["test_cases"] == 1
     assert client.last_result["invalid_test_cases"] == 1
@@ -968,7 +968,7 @@ def test_one_shot_failing_propagates_exception(client):
         raise AssertionError("boom")
 
     with pytest.raises(AssertionError, match="boom"):
-        client.run_test(test, one_shot=True)
+        client.one_shot(test)
 
     assert call_count[0] == 1
 
@@ -986,7 +986,7 @@ def test_one_shot_no_shrinking_no_replay(client):
         assert x < 0
 
     with pytest.raises(AssertionError):
-        client.run_test(test, one_shot=True)
+        client.one_shot(test)
 
     assert call_count[0] == 1
 
@@ -1002,8 +1002,8 @@ def test_one_shot_with_seed_is_deterministic(client, monkeypatch):
             )
         )
 
-    client.run_test(test, one_shot=True, seed=12345)
-    client.run_test(test, one_shot=True, seed=12345)
+    client.one_shot(test, seed=12345)
+    client.one_shot(test, seed=12345)
 
     assert seen[0] == seen[1]
 
@@ -1030,7 +1030,7 @@ def test_one_shot_with_seed_is_nondeterministic_under_urandom(
     # Four runs with the same seed. Under urandom, each draw is independent,
     # so the chance of all four producing the same value is ~(10**-9)**3.
     for _ in range(4):
-        client.run_test(test, one_shot=True, seed=12345)
+        client.one_shot(test, seed=12345)
 
     assert len(seen) > 1
 
@@ -1043,18 +1043,8 @@ def test_one_shot_large_entropy_budget(client):
         for _ in range(20_000):
             generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
 
-    client.run_test(test, one_shot=True)
+    client.one_shot(test)
     assert client.last_result["valid_test_cases"] == 1
-
-
-def test_one_shot_with_failure_blob_is_error(client):
-    """Passing both one_shot and failure_blob is rejected."""
-
-    def test():
-        generate_from_schema({"type": "integer"})
-
-    with pytest.raises(ValueError, match=r"one_shot.*failure_blob"):
-        client.run_test(test, one_shot=True, failure_blob=b"\x00\x00\x00\x00")
 
 
 def test_one_shot_generation_works(client):
@@ -1073,4 +1063,4 @@ def test_one_shot_generation_works(client):
         for x in xs:
             assert 0 <= x <= 100
 
-    client.run_test(test, one_shot=True)
+    client.one_shot(test)

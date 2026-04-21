@@ -623,6 +623,7 @@ Followed by a CBOR-encoded payload and a terminator byte (`0x0A`).
 | Command | Direction | Description |
 |---------|-----------|-------------|
 | `run_test` | Client -> Server | Start a property test |
+| `one_shot` | Client -> Server | Run a single test case in final mode |
 | `generate` | Client -> Server | Generate a value from a schema |
 | `start_span` | Client -> Server | Begin a span group |
 | `stop_span` | Client -> Server | End a span group |
@@ -645,18 +646,15 @@ Followed by a CBOR-encoded payload and a terminator byte (`0x0A`).
 
 ### One-shot Tests
 
-The `run_test` command accepts an optional `one_shot` boolean field. When `true`,
-the server runs exactly one test case in final mode (i.e. the `test_case` event
-is sent with `is_final: true`), reports the result via `test_done`, and performs
-no shrinking, no replay of interesting examples, and no other exploration.
-Clients that want to execute a single property-test pass and then exit
-immediately should set `one_shot: true`.
+The `one_shot` command is a top-level protocol command sent on the control stream
+instead of `run_test`. It accepts a `stream_id` and an optional `seed`. The
+server immediately hands a single test case to the client on the provided stream
+(with `is_final: true`), reports the result via `test_done`, and performs no
+shrinking, no replay, and no other exploration.
 
-`one_shot` cannot be combined with `failure_blob`: the internal entropy budget
-used by a one-shot run is different from the one used for normal runs, so
-failure blobs produced by the two modes are not interchangeable. For the same
-reason, the `test_done` event from a one-shot run always reports an empty
-`failure_blobs` list even when the test fails — the blob could not be replayed.
+The `test_done` event from a one-shot run always reports an empty `failure_blobs`
+list — one-shot blobs use a different internal entropy budget and cannot be
+replayed via `run_test` with `failure_blob`.
 
 ## Error Handling
 

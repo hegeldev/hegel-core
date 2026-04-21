@@ -327,7 +327,20 @@ def run_server_on_connection(connection: Connection) -> None:
                             ),
                             derandomize=message.get("derandomize", False),
                             database=message.get("database", not_set),
-                            one_shot=message.get("one_shot", False),
+                        ),
+                    )
+                    connection.control_stream.write_reply(packet.message_id, True)
+                elif command == "one_shot":
+                    stream = connection.register_client_stream(
+                        message["stream_id"], role="One-shot stream"
+                    )
+
+                    pending_futures.append(
+                        thread_pool.submit(
+                            _one_shot,
+                            connection,
+                            stream,
+                            seed=message.get("seed"),
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
@@ -347,6 +360,62 @@ def run_server_on_connection(connection: Connection) -> None:
             f.cancel()
 
 
+def _one_shot(
+    connection: Connection,
+    stream: Stream,
+    *,
+    seed: int | None,
+) -> dict[str, Any]:
+    """Run a single one-shot test case.
+
+    Immediately hands a single test case to the client on the provided stream,
+    with is_final=True. No shrinking, no replay, no exploration.
+    """
+    try:
+        seed = random.getrandbits(128) if seed is None else seed
+
+        state = HegelState(connection, stream, is_final=True)
+        runner = ConjectureRunner(
+            state.test_function,
+            settings=settings(
+                deadline=None,
+                max_examples=1,
+                backend=(
+                    "hypothesis-urandom"
+                    if os.environ.get("ANTITHESIS_OUTPUT_DIR")
+                    else "hypothesis"
+                ),
+            ),
+            random=Random(seed),
+            database_key=None,
+        )
+        data = runner.new_conjecture_data(
+            [], observer=DataObserver(), max_choices=2**64
+        )
+        data.max_length = 2**64
+        with contextlib.suppress(StopTest):
+            state.test_function(data)
+        data.freeze()
+
+        is_interesting = data.status is Status.INTERESTING
+        is_valid = data.status is Status.VALID
+        is_invalid = data.status is Status.INVALID
+        result: dict[str, Any] = {
+            "passed": not is_interesting,
+            "test_cases": 1,
+            "valid_test_cases": int(is_valid),
+            "invalid_test_cases": int(is_invalid),
+            "interesting_test_cases": int(is_interesting),
+            "seed": str(seed),
+            "failure_blobs": [],
+        }
+        stream.send_request({"event": "test_done", "results": result}).get()
+        return result
+    except Exception:
+        traceback.print_exc()
+        raise
+
+
 def _run_test(
     connection: Connection,
     stream: Stream,
@@ -358,7 +427,6 @@ def _run_test(
     suppress_health_check: list[str] | None,
     derandomize: bool,
     database: str | UniqueIdentifier | None,
-    one_shot: bool = False,
 ) -> dict[str, Any]:
     """Run a single test using ConjectureRunner.
 
@@ -370,19 +438,6 @@ def _run_test(
     - failure: optional dict with failure details
     """
     try:
-        if one_shot and failure_blob is not None:
-            result: dict[str, Any] = {
-                "passed": False,
-                "test_cases": 0,
-                "valid_test_cases": 0,
-                "invalid_test_cases": 0,
-                "interesting_test_cases": 0,
-                "seed": str(seed),
-                "error": "Cannot combine one_shot with failure_blob.",
-            }
-            stream.send_request({"event": "test_done", "results": result}).get()
-            return result
-
         # seed takes precendence over derandomize, like Hypothesis
         if derandomize and seed is None:
             seed = (
@@ -398,7 +453,7 @@ def _run_test(
                 suppress.append(check)
             else:
                 valid = list(SUPPORTED_HEALTH_CHECKS.keys())
-                result = {
+                result: dict[str, Any] = {
                     "passed": False,
                     "test_cases": 0,
                     "valid_test_cases": 0,
@@ -431,7 +486,7 @@ def _run_test(
             **({} if database is not_set else {"database": database}),
         }
 
-        state = HegelState(connection, stream, is_final=one_shot)
+        state = HegelState(connection, stream)
         runner = ConjectureRunner(
             state.test_function,
             settings=settings(**settings_kwargs),  # type: ignore
@@ -439,35 +494,7 @@ def _run_test(
             database_key=database_key,
         )
         try:
-            if one_shot:
-                data = runner.new_conjecture_data(
-                    [], observer=DataObserver(), max_choices=2**64
-                )
-                # Lift the default per-test-case entropy budget so one-shot
-                # tests can generate as much data as they like.
-                data.max_length = 2**64
-                with contextlib.suppress(StopTest):
-                    state.test_function(data)
-                data.freeze()
-
-                is_interesting = data.status is Status.INTERESTING
-                is_valid = data.status is Status.VALID
-                is_invalid = data.status is Status.INVALID
-                # No failure_blobs: one-shot blobs can't be replayed (the server
-                # rejects one_shot + failure_blob), so reporting them would be
-                # misleading.
-                result = {
-                    "passed": not is_interesting,
-                    "test_cases": 1,
-                    "valid_test_cases": int(is_valid),
-                    "invalid_test_cases": int(is_invalid),
-                    "interesting_test_cases": int(is_interesting),
-                    "seed": str(seed),
-                    "failure_blobs": [],
-                }
-                stream.send_request({"event": "test_done", "results": result}).get()
-                return result
-            elif failure_blob is not None:
+            if failure_blob is not None:
                 choices = decode_failure(failure_blob)
                 data = ConjectureData.for_choices(choices)
                 with contextlib.suppress(StopTest):

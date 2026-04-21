@@ -51,6 +51,65 @@ class Client:
         self.__lock = threading.Lock()
         self.last_result: dict | None = None
 
+    def one_shot(
+        self,
+        test_fn: Callable[[], None],
+        *,
+        seed: int | None = None,
+    ) -> None:
+        """Run a single one-shot test case."""
+
+        test_stream = self.connection.new_stream()
+
+        message: dict[str, Any] = {
+            "command": "one_shot",
+            "seed": seed,
+            "stream_id": test_stream.stream_id,
+        }
+
+        with self.__lock:
+            self._control.send_request(message)
+
+        result_data = None
+
+        while True:
+            packet = test_stream.read_request()
+            message = cbor2.loads(packet.payload)
+            event = message.get("event")
+
+            if event == "test_case":
+                stream_id = message["stream_id"]
+                is_final = message.get("is_final", False)
+                test_stream.write_reply(packet.message_id, None)
+                test_case_stream = self.connection.connect_stream(stream_id)
+                self._run_test_case(test_case_stream, test_fn, is_final=is_final)
+            elif event == "test_done":
+                test_stream.write_reply(packet.message_id, True)
+                result_data = message["results"]
+                break
+            else:
+                test_stream.write_reply_error(
+                    packet.message_id,
+                    error=f"Unrecognised event {event}",
+                    error_type="InvalidMessage",
+                )
+
+        assert result_data is not None
+        self.last_result = result_data
+
+        if "error" in result_data:
+            raise ValueError(result_data["error"])
+
+        n_interesting = result_data["interesting_test_cases"]
+
+        if n_interesting == 0:
+            return
+
+        # One-shot runs in final mode, so the exception was already raised
+        # during the test_case handling above. This path handles the case
+        # where is_final was set but the exception wasn't propagated.
+        raise ValueError("One-shot test failed but exception was not propagated")
+
     def run_test(
         self,
         test_fn: Callable[[], None],
@@ -62,7 +121,6 @@ class Client:
         database_key: bytes | None = None,
         derandomize: bool = False,
         database: str | None | UniqueIdentifier = not_set,
-        one_shot: bool = False,
     ) -> None:
         """Run a property test."""
 
@@ -76,7 +134,6 @@ class Client:
             "database_key": database_key,
             "derandomize": derandomize,
             "failure_blob": failure_blob,
-            "one_shot": one_shot,
         }
         if database is not not_set:
             message["database"] = database
