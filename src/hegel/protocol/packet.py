@@ -83,7 +83,8 @@ class Packet:
 
 def read_exact(sock: socket.socket, *, n: int) -> bytes:
     """Read exactly n bytes from the socket."""
-    assert n >= 0
+    if n < 0:
+        raise ValueError(f"read_exact: n must be non-negative, got {n}")
     if n == 0:
         return b""
 
@@ -109,7 +110,10 @@ def read_packet(sock: socket.socket, *, timeout: float | None = None) -> Packet:
     magic, checksum, stream, message_id, length = struct.unpack(
         PACKET_HEADER_FORMAT, header
     )
-    assert magic == PACKET_MAGIC
+    if magic != PACKET_MAGIC:
+        raise ProtocolError(
+            f"Bad magic: expected 0x{PACKET_MAGIC:08X}, got 0x{magic:08X}"
+        )
 
     is_reply = (message_id & REPLY_BIT) != 0
     if is_reply:
@@ -117,12 +121,16 @@ def read_packet(sock: socket.socket, *, timeout: float | None = None) -> Packet:
 
     payload = read_exact(sock, n=length)
     terminator = read_exact(sock, n=1)[0]
-    assert terminator == PACKET_TERMINATOR
+    if terminator != PACKET_TERMINATOR:
+        raise ProtocolError(
+            f"Bad terminator: expected 0x{PACKET_TERMINATOR:02X}, got 0x{terminator:02X}"
+        )
 
     # checksum is defined as crc(header + payload), where the header's checksum has
     # been zeroed
     zeroed_header = header[:4] + b"\x00\x00\x00\x00" + header[8:]
-    assert zlib.crc32(zeroed_header + payload) == checksum
+    if zlib.crc32(zeroed_header + payload) != checksum:
+        raise ProtocolError("Packet checksum mismatch")
 
     return Packet(
         stream_id=stream,

@@ -64,7 +64,10 @@ def run_test_server(connection: Connection, mode: str) -> None:
         # Wait for run_test command on control stream
         packet = connection.control_stream.read_request()
         message = cbor2.loads(packet.payload)
-        assert message.get("command") == "run_test"
+        if message.get("command") != "run_test":
+            raise ValueError(
+                f"Expected run_test command, got {message.get('command')!r}"
+            )
         test_stream = connection.register_client_stream(
             message["stream_id"],
             role="Test stream",
@@ -107,14 +110,18 @@ def _read_cbor_request(
 def _handle_normal_generate(data_stream: Stream) -> None:
     """Handle generate commands normally, returning a boolean value."""
     msg_id, message = _read_cbor_request(data_stream)
-    assert message.get("command") == "generate"
+    if message.get("command") != "generate":
+        raise ValueError(f"Expected generate command, got {message.get('command')!r}")
     data_stream.write_reply(msg_id, True)
 
 
 def _wait_for_mark_complete(data_stream: Stream) -> tuple[MessageId, dict]:
     """Wait for mark_complete command from client."""
     msg_id, message = _read_cbor_request(data_stream)
-    assert message.get("command") == "mark_complete"
+    if message.get("command") != "mark_complete":
+        raise ValueError(
+            f"Expected mark_complete command, got {message.get('command')!r}"
+        )
     return msg_id, message
 
 
@@ -155,7 +162,8 @@ def _mode_stop_test_on_generate(
     # Second test case: StopTest on generate
     data_stream_2 = _send_test_case(connection, test_stream)
     msg_id, message = _read_cbor_request(data_stream_2)
-    assert message.get("command") == "generate"
+    if message.get("command") != "generate":
+        raise ValueError(f"Expected generate command, got {message.get('command')!r}")
     data_stream_2.write_reply_error(msg_id, error="StopTest", error_type="StopTest")
 
     # Wait briefly to see if client incorrectly sends mark_complete
@@ -274,7 +282,8 @@ def _mode_error_response(
     data_stream = _send_test_case(connection, test_stream)
 
     msg_id, message = _read_cbor_request(data_stream)
-    assert message.get("command") == "generate"
+    if message.get("command") != "generate":
+        raise ValueError(f"Expected generate command, got {message.get('command')!r}")
     data_stream.write_reply_error(
         msg_id,
         error="Simulated error for testing",

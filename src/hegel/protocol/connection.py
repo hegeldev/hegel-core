@@ -14,7 +14,12 @@ from hegel.protocol.packet import (
     read_packet,
     write_packet,
 )
-from hegel.protocol.utils import SHUTDOWN, ConnectionClosedError, StreamId
+from hegel.protocol.utils import (
+    SHUTDOWN,
+    ConnectionClosedError,
+    ProtocolError,
+    StreamId,
+)
 
 if TYPE_CHECKING:
     from hegel.protocol.stream import Stream
@@ -242,10 +247,14 @@ class Connection:
             write_packet(self.__socket, packet)
 
     def receive_handshake(self):
-        assert not self._handshake_done
+        if self._handshake_done:
+            raise ProtocolError("Handshake already completed")
 
         packet = self.control_stream.read_request()
-        assert packet.payload == HANDSHAKE_STRING
+        if packet.payload != HANDSHAKE_STRING:
+            raise ProtocolError(
+                f"Bad handshake: expected {HANDSHAKE_STRING!r}, got {packet.payload!r}"
+            )
         # we expect the payload to be pure ASCII. ASCII and utf-8 overlap, so passing
         # "ascii" as the encoding is equivalent in the standard case, but gives us a
         # fail-fast error otherwise.
@@ -260,11 +269,14 @@ class Connection:
 
         stream = Stream(connection=self, stream_id=stream_id, role=role)
         with self.__writer_lock:
+            if stream.stream_id in self.streams:
+                raise ProtocolError(f"Stream {stream.stream_id} is already registered")
             self.streams[stream.stream_id] = stream
         return stream
 
     def new_stream(self, *, role: str | None = None) -> "Stream":
-        assert self._handshake_done
+        if not self._handshake_done:
+            raise ProtocolError("Cannot create streams before handshake")
         # server streams get even ids
         with self.__writer_lock:
             stream_id = StreamId(self.__next_stream_id << 1)
@@ -285,8 +297,10 @@ class Connection:
         been created by the client or the server. This method's name explicitly mentions
         the client origin for protocol hygiene, not because it has a fundamental impact.
         """
-        assert self._handshake_done
-        assert stream_id not in self.streams
-        # client streams have odd ids
-        assert stream_id & 1 == 1
+        if not self._handshake_done:
+            raise ProtocolError("Cannot register streams before handshake")
+        if stream_id in self.streams:
+            raise ProtocolError(f"Stream {stream_id} is already registered")
+        if stream_id & 1 != 1:
+            raise ProtocolError(f"Client stream id must be odd, got {stream_id}")
         return self._make_stream(stream_id, role=role)

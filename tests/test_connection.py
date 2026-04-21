@@ -9,7 +9,7 @@ import pytest
 
 from hegel.protocol import Connection, Packet, RequestError
 from hegel.protocol.connection import PROTOCOL_VERSION
-from hegel.protocol.utils import SHUTDOWN
+from hegel.protocol.utils import SHUTDOWN, ProtocolError
 from tests.client import ClientConnection
 
 
@@ -609,7 +609,7 @@ def test_double_handshake_receive_raises(socket_pair):
 
         def server_side():
             server_conn.receive_handshake()
-            with pytest.raises(AssertionError):
+            with pytest.raises(ProtocolError, match="Handshake already completed"):
                 server_conn.receive_handshake()
 
         t = Thread(target=server_side, daemon=True)
@@ -622,7 +622,7 @@ def test_connect_stream_before_handshake_raises(socket):
     """Test that connect_stream before handshake raises."""
     with (
         Connection(socket) as conn,
-        pytest.raises(AssertionError),
+        pytest.raises(ProtocolError, match="Cannot register streams before handshake"),
     ):
         conn.register_client_stream(1)
 
@@ -637,7 +637,7 @@ def test_connect_stream_already_exists_raises(socket_pair):
         _do_handshake(server_conn, client_conn)
 
         # Connect to stream 0 which already exists (control stream)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ProtocolError, match="already registered"):
             server_conn.register_client_stream(0)
 
 
@@ -645,13 +645,35 @@ def test_new_stream_before_handshake_raises(socket):
     """Test that new_stream before handshake raises."""
     with (
         Connection(socket) as conn,
-        pytest.raises(AssertionError),
+        pytest.raises(ProtocolError, match="Cannot create streams before handshake"),
     ):
         conn.new_stream()
 
 
+def test_make_stream_duplicate_raises(socket):
+    """Test that _make_stream rejects a duplicate stream id."""
+    with Connection(socket) as conn:
+        conn._handshake_done = True
+        conn._make_stream(1, role="First")
+        with pytest.raises(ProtocolError, match="already registered"):
+            conn._make_stream(1, role="Duplicate")
+
+
+def test_register_client_stream_even_id_raises(socket_pair):
+    """Test that registering a client stream with an even id raises."""
+    server_socket, client_socket = socket_pair
+    with (
+        Connection(server_socket) as server_conn,
+        ClientConnection(client_socket) as client_conn,
+    ):
+        _do_handshake(server_conn, client_conn)
+
+        with pytest.raises(ProtocolError, match="Client stream id must be odd"):
+            server_conn.register_client_stream(2)
+
+
 def test_bad_handshake_negotiation(socket_pair):
-    """Test handshake with bad version string asserts."""
+    """Test handshake with bad version string raises."""
     server_socket, client_socket = socket_pair
     with (
         Connection(server_socket) as server_conn,
@@ -665,7 +687,7 @@ def test_bad_handshake_negotiation(socket_pair):
         t = Thread(target=send_bad, daemon=True)
         t.start()
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(ProtocolError, match="Bad handshake"):
             server_conn.receive_handshake()
 
         t.join(timeout=5)
@@ -1050,6 +1072,17 @@ def test_write_request_concurrent_message_ids_unique(socket_pair):
         assert len(set(results)) == n_workers
 
 
+def test_stream_constructor_rejects_non_control_stream_id_zero(socket):
+    """Test that creating a stream with id 0 and non-Control role raises."""
+    from hegel.protocol.stream import Stream
+
+    with (
+        Connection(socket) as conn,
+        pytest.raises(ProtocolError, match="Stream id must be positive"),
+    ):
+        Stream(connection=conn, stream_id=0, role="NotControl")
+
+
 def test_write_packet_after_close_raises(socket):
     """Test that write_packet raises ConnectionError after close."""
     conn = Connection(socket)
@@ -1083,7 +1116,7 @@ def test_handshake_flag_is_false_until_handshake_completes(socket_pair):
     t.start()
     assert read_entered.wait(timeout=2.0)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ProtocolError, match="Cannot create streams before handshake"):
         server_conn.new_stream()
 
     client_conn = ClientConnection(client_socket)

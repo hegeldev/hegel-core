@@ -15,6 +15,7 @@ from hegel.protocol.utils import (
     SHUTDOWN,
     STREAM_TIMEOUT,
     MessageId,
+    ProtocolError,
     RequestError,
     StreamId,
 )
@@ -64,7 +65,10 @@ class Stream:
         stream_id: StreamId,
         role: str | None = None,
     ) -> None:
-        assert stream_id > 0 or role == "Control"
+        if stream_id <= 0 and role != "Control":
+            raise ProtocolError(
+                f"Stream id must be positive (got {stream_id}), or role must be 'Control'"
+            )
 
         self.connection = connection
         self.stream_id = stream_id
@@ -155,7 +159,6 @@ class Stream:
 
     def write_request(self, payload: bytes) -> Packet:
         """Write a request packet to the socket. Returns the packet."""
-        assert isinstance(payload, bytes)
         with self._write_lock:
             packet = Packet(
                 payload=payload,
@@ -183,7 +186,6 @@ class Stream:
 
     def write_reply_bytes(self, message_id: MessageId, payload: bytes) -> None:
         """Write a reply packet to the socket."""
-        assert isinstance(payload, bytes)
         self.connection.write_packet(
             Packet(
                 payload=payload,

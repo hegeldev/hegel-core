@@ -64,6 +64,17 @@ def test_unknown_command_on_data_stream(client):
     client.run_test(test, test_cases=1)
 
 
+def test_mark_complete_with_overrun_status_raises(client):
+    """Sending mark_complete with OVERRUN status is rejected by the server."""
+
+    def test():
+        generate_from_schema({"type": "integer"})
+        with pytest.raises(RequestError, match="Unexpected mark_complete status"):
+            _request({"command": "mark_complete", "status": "OVERRUN", "origin": None})
+
+    client.run_test(test, test_cases=1)
+
+
 def test_cache_eviction():
     # Fill the cache beyond its max size
     for i in range(FROM_SCHEMA_CACHE.max_size + 10):

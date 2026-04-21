@@ -76,7 +76,7 @@ def test_read_packet_invalid_magic(socket_pair):
     reader, writer = socket_pair
     raw = _make_packet(magic=0xDEADBEEF)
     writer.sendall(raw)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ProtocolError, match="Bad magic"):
         read_packet(reader)
 
 
@@ -84,7 +84,7 @@ def test_read_packet_invalid_terminator(socket_pair):
     reader, writer = socket_pair
     raw = _make_packet(terminator=0xFF)
     writer.sendall(raw)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ProtocolError, match="Bad terminator"):
         read_packet(reader)
 
 
@@ -92,5 +92,11 @@ def test_read_packet_bad_checksum(socket_pair):
     reader, writer = socket_pair
     raw = _make_packet(checksum=0x12345678)
     writer.sendall(raw)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ProtocolError, match="checksum mismatch"):
         read_packet(reader)
+
+
+def test_read_exact_negative_n(socket_pair):
+    reader, _ = socket_pair
+    with pytest.raises(ValueError, match="non-negative"):
+        read_exact(reader, n=-1)
