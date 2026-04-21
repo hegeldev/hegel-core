@@ -197,7 +197,6 @@ class Connection:
     def receive_handshake(self):
         assert not self._handshake_done
 
-        self._handshake_done = True
         packet = self.control_stream.read_request()
         assert packet.payload == HANDSHAKE_STRING
         # we expect the payload to be pure ASCII. ASCII and utf-8 overlap, so passing
@@ -206,6 +205,7 @@ class Connection:
         self.control_stream.write_reply_bytes(
             packet.message_id, f"Hegel/{PROTOCOL_VERSION}".encode("ascii")
         )
+        self._handshake_done = True
 
     def _make_stream(self, stream_id: StreamId, *, role: str | None = None) -> "Stream":
         """Create and register a stream."""

@@ -887,6 +887,41 @@ def test_write_packet_after_close_raises(socket):
         )
 
 
+def test_handshake_flag_is_false_until_handshake_completes(socket_pair):
+    """Regression: receive_handshake used to set self._handshake_done = True
+    as its first statement, so the assert in new_stream could pass while
+    the server was still waiting for the client's handshake bytes.
+    """
+    import threading as _threading
+
+    server_socket, client_socket = socket_pair
+    server_conn = Connection(server_socket)
+
+    read_entered = _threading.Event()
+    orig_read_request = server_conn.control_stream.read_request
+
+    def hooked_read_request(*args, **kwargs):
+        read_entered.set()
+        return orig_read_request(*args, **kwargs)
+
+    server_conn.control_stream.read_request = hooked_read_request
+
+    t = Thread(target=server_conn.receive_handshake, daemon=True)
+    t.start()
+    assert read_entered.wait(timeout=2.0)
+
+    with pytest.raises(AssertionError):
+        server_conn.new_stream()
+
+    client_conn = ClientConnection(client_socket)
+    client_conn.send_handshake()
+    t.join(timeout=5)
+
+    server_conn.new_stream()
+    client_conn.close()
+    server_conn.close()
+
+
 def test_invalid_hegel_debug_env_var():
     result = subprocess.run(
         [
