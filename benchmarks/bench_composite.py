@@ -127,7 +127,7 @@ def bench_shrink_matrices(client: Client) -> float:
     """
     Mirrors hegel-rust test_can_shrink_matrices_with_length_param.
 
-    Draws a rows×columns matrix and looks for a non-symmetric square matrix.
+    Draws a rows x columns matrix and looks for a non-symmetric square matrix.
     Round-trip count per test case is 2 + rows*cols, stressing shrinking.
     """
 
@@ -204,7 +204,9 @@ def main() -> None:
         else:
             mean = statistics.mean(times)
             stdev = statistics.stdev(times)
-            print(f"  mean={mean:.3f}s  stdev={stdev:.3f}s  min={min(times):.3f}s  max={max(times):.3f}s")
+            print(
+                f"  mean={mean:.3f}s  stdev={stdev:.3f}s  min={min(times):.3f}s  max={max(times):.3f}s"
+            )
 
 
 if __name__ == "__main__":

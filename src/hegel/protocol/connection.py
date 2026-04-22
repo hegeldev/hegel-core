@@ -171,6 +171,8 @@ class Connection:
             if not v.closed:
                 with contextlib.suppress(trio.ClosedResourceError):
                     await v._packet_send.aclose()
+                if v._sync_requests is not None:
+                    v._sync_requests.put(ConnectionError("Connection closed"))
 
     async def _reader_loop(self) -> None:
         try:
@@ -199,6 +201,8 @@ class Connection:
                     stream.closed = True
                     with contextlib.suppress(trio.ClosedResourceError):
                         await stream._packet_send.aclose()
+                    if stream._sync_requests is not None:
+                        stream._sync_requests.put(ConnectionError("Connection closed"))
                 else:
                     if stream.closed:
                         self._debug_print(f"Received packet for closed stream {stream}")
@@ -217,7 +221,10 @@ class Connection:
                         )
                     elif packet.is_reply:
                         stream._routed_reply_ids.add(packet.message_id)
-                    await stream._packet_send.send(packet)
+                    if not packet.is_reply and stream._sync_requests is not None:
+                        stream._sync_requests.put(packet)
+                    else:
+                        await stream._packet_send.send(packet)
         except (
             ConnectionClosedError,
             OSError,

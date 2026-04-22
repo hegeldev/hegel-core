@@ -2,6 +2,7 @@ import contextlib
 import itertools
 import json
 import os
+import queue
 import random
 import traceback
 from random import Random
@@ -189,6 +190,7 @@ class HegelState:
             test_case_stream = trio.from_thread.run(
                 lambda: self._connection.new_stream(role="Test Case")
             )
+            test_case_stream._sync_requests = queue.SimpleQueue()
             trio.from_thread.run(
                 self._stream.send_request,
                 {
@@ -312,7 +314,7 @@ class HegelState:
             # internals (data.draw etc.), so it must run here in the worker thread —
             # not on the event loop.
             while not done:
-                packet = trio.from_thread.run(test_case_stream.read_request)
+                packet = test_case_stream.read_request_sync()
                 message = cbor2.loads(packet.payload)
                 try:
                     result = handle_client_request(message)
