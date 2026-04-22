@@ -1,6 +1,5 @@
 import contextlib
 import math
-import queue
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -65,9 +64,6 @@ class Stream:
         self._write_lock = trio.Lock()
         self._close_lock = trio.Lock()
         self.closed = False
-        # When set, non-reply packets are delivered here instead of the memory
-        # channel, so worker threads can receive them without trio.from_thread.run.
-        self._sync_requests: queue.SimpleQueue[Packet | BaseException] | None = None
 
     def __repr__(self):
         if self.role is None and self.connection.name is None:
@@ -84,8 +80,6 @@ class Stream:
             self.closed = True
         with contextlib.suppress(trio.ClosedResourceError):
             await self._packet_send.aclose()
-        if self._sync_requests is not None:
-            self._sync_requests.put(ConnectionError("Connection closed"))
         if self.connection.running:
             await self.connection.write_packet(
                 Packet(
@@ -176,22 +170,6 @@ class Stream:
         while message_id not in self.replies:
             await self._read_one_packet(timeout=timeout)
         return self.replies.pop(message_id)
-
-    def read_request_sync(self, *, timeout: float | None = STREAM_TIMEOUT) -> Packet:
-        """Wait synchronously for a request packet, for use from worker threads.
-
-        Requires _sync_requests to have been set before the stream receives any packets.
-        """
-        assert self._sync_requests is not None
-        try:
-            item = self._sync_requests.get(timeout=timeout)
-        except queue.Empty:
-            raise TimeoutError(
-                f"Timed out after {timeout}s waiting for a message on {self!r}"
-            ) from None
-        if isinstance(item, BaseException):
-            raise item
-        return item
 
     async def read_request(self, *, timeout: float | None = STREAM_TIMEOUT) -> Packet:
         """Wait to receive a request, and return it."""

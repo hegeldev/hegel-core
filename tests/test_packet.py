@@ -12,6 +12,7 @@ from hegel.protocol.packet import (
     PACKET_HEADER_FORMAT,
     PACKET_MAGIC,
     PACKET_TERMINATOR,
+    TrioBufferedReader,
     aread_exact,
     aread_packet,
     read_exact,
@@ -172,5 +173,43 @@ def test_aread_packet_bad_terminator():
         async with trio.SocketStream(r) as stream:
             with pytest.raises(ProtocolError, match="Bad terminator"):
                 await aread_packet(stream)
+
+    trio.run(run)
+
+
+def test_aread_exact_connection_closed_no_data():
+    async def run():
+        r, w = trio.socket.socketpair()
+        async with trio.SocketStream(r) as stream:
+            await trio.SocketStream(w).aclose()
+            with pytest.raises(ConnectionClosedError, match="Connection closed"):
+                await aread_exact(stream, n=10)
+
+    trio.run(run)
+
+
+def test_trio_buffered_reader_partial_data_then_close():
+    async def run():
+        r, w = trio.socket.socketpair()
+        async with trio.SocketStream(r) as stream:
+            reader = TrioBufferedReader(stream)
+            await trio.SocketStream(w).send_all(b"partial")
+            await trio.SocketStream(w).aclose()
+            with pytest.raises(ProtocolError, match="bytes read so far"):
+                await reader.read_exactly(100)
+
+    trio.run(run)
+
+
+def test_trio_buffered_reader_bad_terminator():
+    async def run():
+        r, w = trio.socket.socketpair()
+        raw = _make_packet(terminator=0xFF)
+        await trio.SocketStream(w).send_all(raw)
+        await trio.SocketStream(w).aclose()
+        async with trio.SocketStream(r) as stream:
+            reader = TrioBufferedReader(stream)
+            with pytest.raises(ProtocolError, match="Bad terminator"):
+                await reader.read_packet()
 
     trio.run(run)

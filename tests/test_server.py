@@ -225,11 +225,11 @@ def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
     thread.join(timeout=10)
 
 
-def test_connection_error_from_run_test_sync_is_suppressed(monkeypatch):
-    """Tests that ConnectionError raised by _run_test_sync is silently discarded.
+def test_connection_error_from_run_test_is_suppressed(monkeypatch):
+    """Tests that ConnectionError raised during test execution is silently discarded.
 
-    When _run_test_sync raises ConnectionError (e.g., because the connection
-    dropped mid-run), _run_test catches it and continues silently. This covers
+    When _run_test encounters a ConnectionError (e.g., because the connection
+    dropped mid-run), it catches it and continues silently. This covers
     the except (ConnectionError, OSError): pass branch in _run_test.
     """
     server_socket, client_socket = socket.socketpair()
@@ -237,7 +237,7 @@ def test_connection_error_from_run_test_sync_is_suppressed(monkeypatch):
     def raise_connection_error(*args, **kwargs):
         raise ConnectionError("simulated mid-run disconnect")
 
-    monkeypatch.setattr("hegel.server._run_test_sync", raise_connection_error)
+    monkeypatch.setattr("hegel.server.HegelState", raise_connection_error)
 
     server_fd = os.dup(server_socket.fileno())
     server_socket.close()

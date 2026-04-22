@@ -2,7 +2,6 @@ import contextlib
 import itertools
 import json
 import os
-import queue
 import random
 import traceback
 from random import Random
@@ -155,19 +154,6 @@ class Variables:
 
 
 class HegelState:
-    """State for a test run that communicates with the client.
-
-    The test_function method handles a single test case by:
-    1. Creating a stream for communication
-    2. Sending a test_case event to the client
-    3. Handling generate/span/target requests from the client until mark_complete
-    4. Applying the final status to the ConjectureData
-
-    test_function is called synchronously by Hypothesis inside a trio worker
-    thread. All async stream operations are dispatched back to the trio event
-    loop via trio.from_thread.run().
-    """
-
     def __init__(
         self,
         connection: Connection,
@@ -180,24 +166,20 @@ class HegelState:
         self._is_final = is_final
         self.flaky_error: Flaky | None = None
 
-    def test_function(self, data: ConjectureData) -> None:
+    async def async_test_function(self, data: ConjectureData) -> None:
         collections: dict[int, many] = {}
         variable_pools: list[Variables] = []
         collection_id_counter = itertools.count()
         generate_count = 0
 
         with BuildContext(data, is_final=self._is_final, wrapped_test=None):  # type: ignore
-            test_case_stream = trio.from_thread.run(
-                lambda: self._connection.new_stream(role="Test Case")
-            )
-            test_case_stream._sync_requests = queue.SimpleQueue()
-            trio.from_thread.run(
-                self._stream.send_request,
+            test_case_stream = await self._connection.new_stream(role="Test Case")
+            await self._stream.send_request(
                 {
                     "event": "test_case",
                     "stream_id": test_case_stream.stream_id,
                     "is_final": self._is_final,
-                },
+                }
             )
 
             done = False
@@ -309,18 +291,13 @@ class HegelState:
                     self.flaky_error = e
                     raise
 
-            # Drive the request/reply loop from this trio worker thread.
-            # handle_client_request is synchronous and may call blocking Hypothesis
-            # internals (data.draw etc.), so it must run here in the worker thread —
-            # not on the event loop.
             while not done:
-                packet = test_case_stream.read_request_sync()
+                packet = await test_case_stream.read_request()
                 message = cbor2.loads(packet.payload)
                 try:
                     result = handle_client_request(message)
                 except BaseException as e:
-                    trio.from_thread.run(
-                        test_case_stream.write_reply_error,
+                    await test_case_stream.write_reply_error(
                         packet.message_id,
                         str(e),
                         type(e).__name__,
@@ -328,11 +305,10 @@ class HegelState:
                     if not isinstance(e, Exception):
                         raise
                     continue
-                trio.from_thread.run(
-                    test_case_stream.write_reply,
-                    packet.message_id,
-                    result,
-                )
+                await test_case_stream.write_reply(packet.message_id, result)
+
+    def test_function(self, data: ConjectureData) -> None:
+        trio.from_thread.run(self.async_test_function, data)
 
 
 async def run_server_on_connection(connection: Connection) -> None:
@@ -462,43 +438,8 @@ async def _run_test(
     derandomize: bool = False,
     database: str | UniqueIdentifier | None = not_set,
 ) -> None:
-    """Run a single test using ConjectureRunner inside a trio worker thread."""
     try:
-        await trio.to_thread.run_sync(
-            lambda: _run_test_sync(
-                connection,
-                stream,
-                test_cases=test_cases,
-                database_key=database_key,
-                seed=seed,
-                failure_blob=failure_blob,
-                suppress_health_check=suppress_health_check,
-                derandomize=derandomize,
-                database=database,
-            ),
-            abandon_on_cancel=True,
-        )
-    except (ConnectionError, OSError):
-        pass
-    except Exception:
-        traceback.print_exc()
-
-
-def _run_test_sync(
-    connection: Connection,
-    stream: Stream,
-    *,
-    test_cases: int,
-    database_key: bytes | None,
-    seed: int | None,
-    failure_blob: bytes | None = None,
-    suppress_health_check: list[str] | None,
-    derandomize: bool,
-    database: str | UniqueIdentifier | None,
-) -> dict[str, Any]:
-    """Synchronous test execution — runs inside a trio worker thread."""
-    try:
-        # seed takes precendence over derandomize, like Hypothesis
+        # seed takes precedence over derandomize, like Hypothesis
         if derandomize and seed is None:
             seed = (
                 int.from_bytes(database_key, "big") if database_key is not None else 0
@@ -525,11 +466,8 @@ def _run_test_sync(
                         f"Valid health checks are: {valid}"
                     ),
                 }
-                trio.from_thread.run(
-                    stream.send_request,
-                    {"event": "test_done", "results": result},
-                )
-                return result
+                await stream.send_request({"event": "test_done", "results": result})
+                return
 
         if database is None:
             database_key = None
@@ -561,7 +499,7 @@ def _run_test_sync(
                 choices = decode_failure(failure_blob)
                 data = ConjectureData.for_choices(choices)
                 with contextlib.suppress(StopTest):
-                    state.test_function(data)
+                    await state.async_test_function(data)
 
                 is_interesting = data.status is Status.INTERESTING
                 result = {
@@ -578,7 +516,7 @@ def _run_test_sync(
                     result["failure_blobs"] = []
                     interesting_choices = []
             else:
-                runner.run()
+                await trio.to_thread.run_sync(runner.run, abandon_on_cancel=True)
 
                 result = {
                     "passed": len(runner.interesting_examples) == 0,
@@ -609,17 +547,13 @@ def _run_test_sync(
                 "health_check_failure": str(e),
             }
             _write_run_metrics(result)
-            trio.from_thread.run(
-                stream.send_request, {"event": "test_done", "results": result}
-            )
-            return result
+            await stream.send_request({"event": "test_done", "results": result})
+            return
         except Flaky as e:
             result = _flaky_result(runner, seed, e, state.flaky_error)
             _write_run_metrics(result)
-            trio.from_thread.run(
-                stream.send_request, {"event": "test_done", "results": result}
-            )
-            return result
+            await stream.send_request({"event": "test_done", "results": result})
+            return
 
         # Check for flaky behavior detected during test execution
         flaky_error = state.flaky_error
@@ -631,20 +565,17 @@ def _run_test_sync(
             result["flaky"] = FLAKY_TEST_RESULT_MSG
 
         _write_run_metrics(result)
-        trio.from_thread.run(
-            stream.send_request, {"event": "test_done", "results": result}
-        )
+        await stream.send_request({"event": "test_done", "results": result})
 
         final_state = HegelState(connection, stream, is_final=True)
 
         for choices in interesting_choices:
             with contextlib.suppress(StopTest):
-                final_state.test_function(ConjectureData.for_choices(choices))
+                await final_state.async_test_function(
+                    ConjectureData.for_choices(choices)
+                )
 
-        return result
+    except (ConnectionError, OSError):
+        pass
     except Exception:
-        # We don't actually await the futures and just sortof run them fire and
-        # forget in the background, so we won't see any exceptions that are
-        # thrown unless we print them here.
         traceback.print_exc()
-        raise
