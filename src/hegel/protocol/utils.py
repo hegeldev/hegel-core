@@ -1,8 +1,6 @@
 import os
 from typing import NewType
 
-from hegel.utils import UniqueIdentifier
-
 
 class ProtocolError(Exception):
     """
@@ -34,5 +32,3 @@ StreamId = NewType("StreamId", int)
 MessageId = NewType("MessageId", int)
 
 STREAM_TIMEOUT = float(os.getenv("HEGEL_STREAM_TIMEOUT", 30))
-
-SHUTDOWN = UniqueIdentifier("shutdown")

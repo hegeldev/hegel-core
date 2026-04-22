@@ -154,6 +154,14 @@ class Variables:
 
 
 class HegelState:
+    """State for a single test run that communicates with the client.
+
+    async_test_function handles one test case by creating a stream, sending
+    a test_case event to the client, dispatching generate/span/target/mark_complete
+    requests until the client marks completion, then applying the final status
+    to the ConjectureData.
+    """
+
     def __init__(
         self,
         connection: Connection,

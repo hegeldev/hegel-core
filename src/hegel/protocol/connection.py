@@ -310,7 +310,7 @@ class Connection:
         self._handshake_done = True
 
     def _make_stream(self, stream_id: StreamId, *, role: str | None = None) -> "Stream":
-        """Create and register a stream. Only safe before the reader task is running."""
+        """Create and register a stream."""
         from hegel.protocol.stream import Stream
 
         stream = Stream(connection=self, stream_id=stream_id, role=role)
