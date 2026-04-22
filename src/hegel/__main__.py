@@ -14,20 +14,25 @@ from hegel.test_server import run_test_server
 
 
 class _StdioStream(trio.abc.Stream):
-    """Wrap stdin/stdout file descriptors as a trio bidirectional stream."""
+    """Wrap stdin/stdout file descriptors as a trio bidirectional stream.
+
+    Uses trio.wrap_file so blocking pipe/file I/O runs in a thread pool,
+    making this work on all platforms including Windows (where
+    trio.lowlevel.FdStream only supports sockets).
+    """
 
     def __init__(self, read_fd: int, write_fd: int):
-        self._read = trio.lowlevel.FdStream(read_fd)
-        self._write = trio.lowlevel.FdStream(write_fd)
+        self._read = trio.wrap_file(os.fdopen(read_fd, "rb", buffering=0))
+        self._write = trio.wrap_file(os.fdopen(write_fd, "wb", buffering=0))
 
     async def receive_some(self, max_bytes: int | None = None) -> bytes:
-        return await self._read.receive_some(max_bytes)
+        return await self._read.read(max_bytes or 65536)
 
     async def send_all(self, data: bytes) -> None:
-        await self._write.send_all(data)
+        await self._write.write(data)
 
     async def wait_send_all_might_not_block(self) -> None:  # pragma: no cover
-        await self._write.wait_send_all_might_not_block()
+        pass
 
     async def send_eof(self) -> None:  # pragma: no cover
         await self._write.aclose()
