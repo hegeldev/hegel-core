@@ -452,6 +452,25 @@ def test_request_for_unknown_stream_gets_error_reply(socket_pair):
         assert body["type"] == "ProtocolError"
 
 
+def test_send_error_reply_swallows_oserror_on_closed_connection(socket_pair):
+    """_send_error_reply silently ignores write failures on a closed connection."""
+    server_socket, client_socket = socket_pair
+
+    async def server_side(conn):
+        await conn.receive_handshake()
+        # Close the connection, then call _send_error_reply which will try to write
+        # on a closed connection and get ConnectionError — the except branch.
+        await conn.close()
+        fake_packet = Packet(stream_id=1, message_id=1, is_reply=False, payload=b"x")
+        await conn._send_error_reply(fake_packet, "test error")  # must not raise
+
+    with (
+        run_trio_server(server_socket, server_side),
+        ClientConnection(client_socket) as client_conn,
+    ):
+        client_conn.send_handshake()
+
+
 def test_reply_for_unknown_stream_is_silently_discarded(socket_pair):
     """A reply packet on an unregistered stream is discarded with no response."""
     from hegel.protocol.packet import write_packet

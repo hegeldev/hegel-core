@@ -78,7 +78,7 @@ def make_client(server_cmd=None) -> tuple[Client, ClientConnection, subprocess.P
         server_cmd = _DEFAULT_SERVER_CMD
 
     proc = subprocess.Popen(
-        server_cmd + ["--stdio"],
+        server_cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
