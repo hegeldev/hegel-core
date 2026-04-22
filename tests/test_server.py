@@ -197,7 +197,9 @@ def test_exception_in_run_one_is_printed_and_reraised(monkeypatch, capsys):
     monkeypatch.setattr("hegel.server.ConjectureRunner.run", raise_runtime_error)
 
     async def run():
-        await _run_test(MagicMock(), MagicMock(), 10, None, None, None, [], False, not_set)
+        await _run_test(
+            MagicMock(), MagicMock(), 10, None, None, None, [], False, not_set
+        )
 
     trio.run(run)  # must not raise
     assert "RuntimeError" in capsys.readouterr().err
