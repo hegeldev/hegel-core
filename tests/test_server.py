@@ -1,6 +1,5 @@
 """Tests for server.py uncovered paths."""
 
-import os
 import socket
 import sys
 import time
@@ -153,13 +152,8 @@ def test_future_cancel_on_connection_error(monkeypatch):
 
     monkeypatch.setattr("hegel.server._run_test", raise_connection_error)
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)
@@ -197,13 +191,8 @@ def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
 
     monkeypatch.setattr("hegel.server.ConjectureRunner.run", raise_runtime_error)
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)
@@ -239,13 +228,8 @@ def test_connection_error_from_run_test_is_suppressed(monkeypatch):
 
     monkeypatch.setattr("hegel.server.HegelState", raise_connection_error)
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)
@@ -279,13 +263,9 @@ def test_base_exception_in_server():
     KeyboardInterrupt on the next call (the main loop).
     """
     server_socket, client_socket = socket.socketpair()
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
 
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
 
@@ -1146,13 +1126,8 @@ def test_connection_error_from_single_test_case_is_suppressed(monkeypatch):
 
     monkeypatch.setattr("hegel.server.HegelState", raise_connection_error)
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)
@@ -1182,13 +1157,8 @@ def test_exception_in_single_test_case_is_printed(monkeypatch, capsys):
 
     monkeypatch.setattr("hegel.server.HegelState", raise_runtime_error)
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)

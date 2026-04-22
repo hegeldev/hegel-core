@@ -133,11 +133,7 @@ def test_send_request_error_response(socket_pair):
 
 def test_connection_debug_mode(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="DebugTest", debug=True)
             for payload in [
@@ -156,11 +152,7 @@ def test_connection_debug_mode(socket):
 
 def test_connection_debug_unknown_stream(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Dbg", debug=True)
             packet = Packet(
@@ -330,11 +322,7 @@ def test_stream_timeout(socket_pair):
 
 def test_stream_repr(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             assert "Control" in repr(conn.control_stream)
@@ -698,11 +686,7 @@ def test_double_handshake_receive_raises(socket_pair):
 
 def test_connect_stream_before_handshake_raises(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             with pytest.raises(
@@ -739,11 +723,7 @@ def test_connect_stream_already_exists_raises(socket_pair):
 
 def test_new_stream_before_handshake_raises(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             with pytest.raises(
@@ -757,11 +737,7 @@ def test_new_stream_before_handshake_raises(socket):
 
 def test_make_stream_duplicate_raises(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             conn._handshake_done = True
@@ -833,11 +809,7 @@ def test_send_handshake_returns_server_version(socket_pair):
 
 def test_connection_running(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:  # noqa: SIM117
             async with Connection(stream, nursery=nursery) as conn:
                 assert conn.running
@@ -848,11 +820,7 @@ def test_connection_running(socket):
 
 def test_connection_double_close(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             await conn.close()
@@ -974,11 +942,7 @@ def test_connection_close_is_idempotent(socket_pair):
 
 def test_write_packet_after_close_raises(socket):
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             await conn.close()
@@ -1024,11 +988,7 @@ def test_stream_constructor_rejects_non_control_stream_id_zero(socket):
     from hegel.protocol.stream import Stream
 
     async def run():
-        trio_sock = trio.socket.fromfd(
-            os.dup(socket.fileno()), socket.family, socket.type
-        )
-        socket.close()
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery)
             with pytest.raises(ProtocolError, match="Stream id must be positive"):

@@ -1,5 +1,4 @@
 import contextlib
-import os
 import socket as socket_module
 import threading
 from collections.abc import Callable, Coroutine
@@ -62,16 +61,9 @@ def run_trio_server(
     """
     errors: list[BaseException] = []
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _main():
         try:
-            sock = trio.socket.fromfd(
-                server_fd, socket_module.AF_UNIX, socket_module.SOCK_STREAM
-            )
-            os.close(server_fd)
-            stream = trio.SocketStream(sock)
+            stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
             async with trio.open_nursery() as nursery:
                 conn = Connection(stream, nursery=nursery, name=name, debug=debug)
                 try:

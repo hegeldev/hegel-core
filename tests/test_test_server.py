@@ -1,6 +1,5 @@
 """Tests for the test server error simulation modes."""
 
-import os
 import socket
 from threading import Thread
 
@@ -20,13 +19,9 @@ def _create_socket_pair():
 
 def _start_server(server_sock, mode):
     """Start test server in a thread and return the thread."""
-    server_fd = os.dup(server_sock.fileno())
-    server_sock.close()
 
     async def _run():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_sock))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             try:
@@ -41,13 +36,9 @@ def _start_server(server_sock, mode):
 
 def _start_server_catching(server_sock, mode, errors, catch_types=(ValueError,)):
     """Start test server in a thread, catching specified exceptions into errors."""
-    server_fd = os.dup(server_sock.fileno())
-    server_sock.close()
 
     async def _run():
-        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_sock))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             try:
@@ -432,15 +423,9 @@ class TestCrashAfterHandshake:
         """Server completes handshake then exits with code 1."""
         s1, s2 = _create_socket_pair()
         exit_codes = []
-        server_fd = os.dup(s1.fileno())
-        s1.close()
 
         async def _run():
-            trio_sock = trio.socket.fromfd(
-                server_fd, socket.AF_UNIX, socket.SOCK_STREAM
-            )
-            os.close(server_fd)
-            stream = trio.SocketStream(trio_sock)
+            stream = trio.SocketStream(trio.socket.from_stdlib_socket(s1))
             async with trio.open_nursery() as nursery:
                 conn = Connection(stream, nursery=nursery, name="Server")
                 try:
@@ -463,15 +448,9 @@ class TestCrashAfterHandshake:
         """Server writes error to stderr then exits with code 1."""
         s1, s2 = _create_socket_pair()
         exit_codes = []
-        server_fd = os.dup(s1.fileno())
-        s1.close()
 
         async def _run():
-            trio_sock = trio.socket.fromfd(
-                server_fd, socket.AF_UNIX, socket.SOCK_STREAM
-            )
-            os.close(server_fd)
-            stream = trio.SocketStream(trio_sock)
+            stream = trio.SocketStream(trio.socket.from_stdlib_socket(s1))
             async with trio.open_nursery() as nursery:
                 conn = Connection(stream, nursery=nursery, name="Server")
                 try:

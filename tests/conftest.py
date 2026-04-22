@@ -1,5 +1,4 @@
 import contextlib
-import os
 import socket as socket_module
 from threading import Thread
 
@@ -39,15 +38,8 @@ def socket():
 def _make_client():
     server_socket, client_socket = socket_module.socketpair()
 
-    server_fd = os.dup(server_socket.fileno())
-    server_socket.close()
-
     async def _run_server():
-        trio_sock = trio.socket.fromfd(
-            server_fd, socket_module.AF_UNIX, socket_module.SOCK_STREAM
-        )
-        os.close(server_fd)
-        stream = trio.SocketStream(trio_sock)
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
         async with trio.open_nursery() as nursery:
             conn = Connection(stream, nursery=nursery, name="Server")
             await run_server_on_connection(conn)
