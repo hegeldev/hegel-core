@@ -1,6 +1,7 @@
 """Tests for server.py uncovered paths."""
 
 import socket
+import sys
 import time
 from threading import Thread
 
@@ -915,3 +916,151 @@ def test_server_run_metrics_multiple_failures(client, monkeypatch, tmp_path):
 
     result = json.loads(run_metrics_file.read_text(encoding="utf-8"))
     assert result["interesting_test_cases"] > 1
+
+
+def test_single_test_case_runs_single_passing_case(client):
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    client.single_test_case(test)
+
+    assert call_count[0] == 1
+    assert client.last_result["test_cases"] == 1
+    assert client.last_result["valid_test_cases"] == 1
+    assert client.last_result["interesting_test_cases"] == 0
+    assert client.last_result["passed"] is True
+
+
+def test_single_test_case_is_final(client):
+    """A single_test_case runs in is_final=True mode."""
+    from tests.client.client import _is_final
+
+    seen_is_final = []
+
+    def test():
+        seen_is_final.append(_is_final.get())
+
+    client.single_test_case(test)
+    assert seen_is_final == [True]
+
+
+def test_single_test_case_invalid_assume(client):
+    def test():
+        assume(False)
+
+    client.single_test_case(test)
+
+    assert client.last_result["test_cases"] == 1
+    assert client.last_result["invalid_test_cases"] == 1
+    assert client.last_result["valid_test_cases"] == 0
+    assert client.last_result["interesting_test_cases"] == 0
+    assert client.last_result["passed"] is True
+
+
+def test_single_test_case_failing_propagates_exception(client):
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        raise AssertionError("boom")
+
+    with pytest.raises(AssertionError, match="boom"):
+        client.single_test_case(test)
+
+    assert call_count[0] == 1
+
+
+def test_single_test_case_no_shrinking_no_replay(client):
+    """single_test_case runs exactly once even when the test fails."""
+    call_count = [0]
+
+    def test():
+        call_count[0] += 1
+        # A test that would normally be shrunk extensively.
+        x = generate_from_schema(
+            {"type": "integer", "min_value": 0, "max_value": 10**9},
+        )
+        assert x < 0
+
+    with pytest.raises(AssertionError):
+        client.single_test_case(test)
+
+    assert call_count[0] == 1
+
+
+def test_single_test_case_with_seed_is_deterministic(client, monkeypatch):
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
+    seen = []
+
+    def test():
+        seen.append(
+            generate_from_schema(
+                {"type": "integer", "min_value": 0, "max_value": 10**9},
+            )
+        )
+
+    client.single_test_case(test, seed=12345)
+    client.single_test_case(test, seed=12345)
+
+    assert seen[0] == seen[1]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="hypothesis-urandom falls back to the deterministic backend on Windows",
+)
+def test_single_test_case_with_seed_is_nondeterministic_under_urandom(
+    client, monkeypatch, tmp_path
+):
+    """Under the hypothesis-urandom backend the seed is ignored, so the same
+    seed produces different values across runs."""
+    monkeypatch.setenv("ANTITHESIS_OUTPUT_DIR", str(tmp_path))
+    seen = set()
+
+    def test():
+        seen.add(
+            generate_from_schema(
+                {"type": "integer", "min_value": 0, "max_value": 10**9},
+            )
+        )
+
+    # Four runs with the same seed. Under urandom, each draw is independent,
+    # so the chance of all four producing the same value is ~(10**-9)**3.
+    for _ in range(4):
+        client.single_test_case(test, seed=12345)
+
+    assert len(seen) > 1
+
+
+def test_single_test_case_large_entropy_budget(client):
+    """A single_test_case can generate far more data than Hypothesis's default
+    per-test-case entropy budget would normally allow."""
+
+    def test():
+        for _ in range(20_000):
+            generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    client.single_test_case(test)
+    assert client.last_result["valid_test_cases"] == 1
+
+
+def test_single_test_case_generation_works(client):
+    """A single_test_case can use the full generator surface (lists, spans, etc.)."""
+
+    def test():
+        xs = generate_from_schema(
+            {
+                "type": "list",
+                "elements": {"type": "integer", "min_value": 0, "max_value": 100},
+                "min_size": 1,
+                "max_size": 5,
+            }
+        )
+        assert 1 <= len(xs) <= 5
+        for x in xs:
+            assert 0 <= x <= 100
+
+    client.single_test_case(test)

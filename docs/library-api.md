@@ -623,6 +623,7 @@ Followed by a CBOR-encoded payload and a terminator byte (`0x0A`).
 | Command | Direction | Description |
 |---------|-----------|-------------|
 | `run_test` | Client -> Server | Start a property test |
+| `single_test_case` | Client -> Server | Run a single test case in final mode |
 | `generate` | Client -> Server | Generate a value from a schema |
 | `start_span` | Client -> Server | Begin a span group |
 | `stop_span` | Client -> Server | End a span group |
@@ -642,6 +643,18 @@ Followed by a CBOR-encoded payload and a terminator byte (`0x0A`).
 ### Important Notes
 
 - **Request ID matching**: Always verify reply ID matches request ID.
+
+### Single Test Case
+
+The `single_test_case` command is a top-level protocol command sent on the
+control stream instead of `run_test`. It accepts a `stream_id` and an optional
+`seed`. The server immediately hands a single test case to the client on the
+provided stream (with `is_final: true`), reports the result via `test_done`, and
+performs no shrinking, no replay, and no other exploration.
+
+The `test_done` event from a `single_test_case` run always reports an empty
+`failure_blobs` list — the internal entropy budget is different from normal runs
+and the blobs cannot be replayed via `run_test` with `failure_blob`.
 
 ## Error Handling
 

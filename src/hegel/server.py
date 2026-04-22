@@ -20,8 +20,13 @@ from hypothesis.errors import (
     StopTest,
     UnsatisfiedAssumption,
 )
-from hypothesis.internal.conjecture.data import ConjectureData, Status
+from hypothesis.internal.conjecture.data import ConjectureData, DataObserver, Status
 from hypothesis.internal.conjecture.engine import ConjectureRunner, ExitReason
+from hypothesis.internal.conjecture.providers import (
+    HypothesisProvider,
+    URandom,
+    URandomProvider,
+)
 from hypothesis.internal.conjecture.shrinker import sort_key
 from hypothesis.internal.conjecture.utils import calc_label_from_name, many
 
@@ -330,6 +335,21 @@ def run_server_on_connection(connection: Connection) -> None:
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
+                elif command == "single_test_case":
+                    stream = connection.register_client_stream(
+                        message["stream_id"],
+                        role="Single test case stream",
+                    )
+
+                    pending_futures.append(
+                        thread_pool.submit(
+                            _single_test_case,
+                            connection,
+                            stream,
+                            seed=message.get("seed"),
+                        ),
+                    )
+                    connection.control_stream.write_reply(packet.message_id, True)
                 else:
                     raise ValueError(f"Unknown command: {command}")
     except (ConnectionError, ProtocolError):
@@ -344,6 +364,54 @@ def run_server_on_connection(connection: Connection) -> None:
             f.result(timeout=0.5)
         except (ConnectionError, TimeoutError):
             f.cancel()
+
+
+def _single_test_case(
+    connection: Connection,
+    stream: Stream,
+    *,
+    seed: int | None,
+) -> dict[str, Any]:
+    """Run a single test case.
+
+    Immediately hands a single test case to the client on the provided stream,
+    with is_final=True. No shrinking, no replay, no exploration.
+    """
+    try:
+        antithesis = os.environ.get("ANTITHESIS_OUTPUT_DIR")
+        if antithesis:
+            rng: Random = URandom()
+        else:
+            seed = random.getrandbits(128) if seed is None else seed
+            rng = Random(seed)
+
+        data = ConjectureData(
+            random=rng,
+            observer=DataObserver(),
+            provider=URandomProvider if antithesis else HypothesisProvider,
+            max_choices=2**64,
+        )
+        data.max_length = 2**64
+
+        state = HegelState(connection, stream, is_final=True)
+        with contextlib.suppress(StopTest):
+            state.test_function(data)
+        data.freeze()
+
+        result: dict[str, Any] = {
+            "passed": data.status is not Status.INTERESTING,
+            "test_cases": 1,
+            "valid_test_cases": int(data.status is Status.VALID),
+            "invalid_test_cases": int(data.status is Status.INVALID),
+            "interesting_test_cases": int(data.status is Status.INTERESTING),
+            "seed": str(seed) if not antithesis else None,
+            "failure_blobs": [],
+        }
+        stream.send_request({"event": "test_done", "results": result}).get()
+        return result
+    except Exception:
+        traceback.print_exc()
+        raise
 
 
 def _run_test(
@@ -416,7 +484,7 @@ def _run_test(
             **({} if database is not_set else {"database": database}),
         }
 
-        state = HegelState(connection, stream, is_final=False)
+        state = HegelState(connection, stream)
         runner = ConjectureRunner(
             state.test_function,
             settings=settings(**settings_kwargs),  # type: ignore
