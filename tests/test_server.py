@@ -178,40 +178,29 @@ def test_future_cancel_on_connection_error(monkeypatch):
     thread.join(timeout=10)
 
 
-def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
+def test_exception_in_run_one_is_printed_and_reraised(monkeypatch, capsys):
     """Tests the except Exception handler in _run_test that prints traceback.
 
     When an unexpected exception occurs inside _run_test (e.g., during
     ConjectureRunner.run()), it's caught and the traceback is printed.
+    Calls _run_test directly to avoid a race where nursery cancellation from
+    a disconnecting client can preempt the RuntimeError via trio.Cancelled.
     """
-    server_socket, client_socket = socket.socketpair()
+    from unittest.mock import MagicMock
+
+    from hegel.server import _run_test
+    from hegel.utils import not_set
 
     def raise_runtime_error(*args, **kwargs):
         raise RuntimeError("simulated runner failure")
 
     monkeypatch.setattr("hegel.server.ConjectureRunner.run", raise_runtime_error)
 
-    async def _run_server():
-        stream = trio.SocketStream(trio.socket.from_stdlib_socket(server_socket))
-        async with trio.open_nursery() as nursery:
-            conn = Connection(stream, nursery=nursery, name="Server")
-            await run_server_on_connection(conn)
+    async def run():
+        await _run_test(MagicMock(), MagicMock(), 10, None, None, None, [], False, not_set)
 
-    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
-    thread.start()
-
-    with ClientConnection(client_socket) as client_connection:
-        client = Client(client_connection)
-        stream = client_connection.new_stream()
-        client._control.send_request(
-            {
-                "command": "run_test",
-                "stream_id": stream.stream_id,
-                "test_cases": 10,
-            },
-        )
-
-    thread.join(timeout=10)
+    trio.run(run)  # must not raise
+    assert "RuntimeError" in capsys.readouterr().err
 
 
 def test_connection_error_from_run_test_is_suppressed(monkeypatch):
