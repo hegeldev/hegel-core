@@ -1135,3 +1135,76 @@ def test_single_test_case_generation_works(client):
             assert 0 <= x <= 100
 
     client.single_test_case(test)
+
+
+def test_connection_error_from_single_test_case_is_suppressed(monkeypatch):
+    """ConnectionError raised inside _single_test_case_sync is silently swallowed."""
+    server_socket, client_socket = socket.socketpair()
+
+    def raise_connection_error(*args, **kwargs):
+        raise ConnectionError("simulated mid-run disconnect")
+
+    monkeypatch.setattr("hegel.server.HegelState", raise_connection_error)
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
+    thread.start()
+
+    with ClientConnection(client_socket) as client_connection:
+        client = Client(client_connection)
+        stream = client_connection.new_stream()
+        try:
+            client._control.send_request(
+                {"command": "single_test_case", "stream_id": stream.stream_id}
+            )
+        except ConnectionError:
+            pass
+
+    thread.join(timeout=10)
+
+
+def test_exception_in_single_test_case_is_printed(monkeypatch, capsys):
+    """Non-connection exceptions in _single_test_case_sync are printed and swallowed."""
+    server_socket, client_socket = socket.socketpair()
+
+    def raise_runtime_error(*args, **kwargs):
+        raise RuntimeError("unexpected server error")
+
+    monkeypatch.setattr("hegel.server.HegelState", raise_runtime_error)
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
+    thread.start()
+
+    with ClientConnection(client_socket) as client_connection:
+        client = Client(client_connection)
+        stream = client_connection.new_stream()
+        try:
+            client._control.send_request(
+                {"command": "single_test_case", "stream_id": stream.stream_id}
+            )
+        except ConnectionError:
+            pass
+
+    thread.join(timeout=10)
+    assert "RuntimeError" in capsys.readouterr().err
