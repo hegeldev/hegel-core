@@ -3,6 +3,8 @@ import struct
 import zlib
 
 import pytest
+import trio
+import trio.socket
 from hypothesis import given, strategies as st
 
 from hegel.protocol import Packet, ProtocolError
@@ -10,6 +12,8 @@ from hegel.protocol.packet import (
     PACKET_HEADER_FORMAT,
     PACKET_MAGIC,
     PACKET_TERMINATOR,
+    aread_exact,
+    aread_packet,
     read_exact,
     read_packet,
     write_packet,
@@ -100,3 +104,73 @@ def test_read_exact_negative_n(socket_pair):
     reader, _ = socket_pair
     with pytest.raises(ValueError, match="non-negative"):
         read_exact(reader, n=-1)
+
+
+def test_aread_exact_negative_n():
+    async def run():
+        r, w = trio.socket.socketpair()
+        async with trio.SocketStream(r) as stream:
+            w.close()
+            with pytest.raises(ValueError, match="non-negative"):
+                await aread_exact(stream, n=-1)
+
+    trio.run(run)
+
+
+def test_aread_exact_zero_n():
+    async def run():
+        r, w = trio.socket.socketpair()
+        async with trio.SocketStream(r) as stream:
+            w.close()
+            result = await aread_exact(stream, n=0)
+            assert result == b""
+
+    trio.run(run)
+
+
+def test_aread_exact_partial_data_then_close():
+    async def run():
+        r, w = trio.socket.socketpair()
+        async with trio.SocketStream(r) as stream:
+            await trio.SocketStream(w).send_all(b"hello")
+            await trio.SocketStream(w).aclose()
+            with pytest.raises(ProtocolError, match="bytes read so far"):
+                await aread_exact(stream, n=10)
+
+    trio.run(run)
+
+
+def test_aread_packet_bad_magic():
+    async def run():
+        r, w = trio.socket.socketpair()
+        raw = _make_packet(magic=0xDEADBEEF)
+        await trio.SocketStream(w).send_all(raw)
+        async with trio.SocketStream(r) as stream:
+            with pytest.raises(ProtocolError, match="Bad magic"):
+                await aread_packet(stream)
+
+    trio.run(run)
+
+
+def test_aread_packet_bad_checksum():
+    async def run():
+        r, w = trio.socket.socketpair()
+        raw = _make_packet(checksum=0x12345678)
+        await trio.SocketStream(w).send_all(raw)
+        async with trio.SocketStream(r) as stream:
+            with pytest.raises(ProtocolError, match="checksum mismatch"):
+                await aread_packet(stream)
+
+    trio.run(run)
+
+
+def test_aread_packet_bad_terminator():
+    async def run():
+        r, w = trio.socket.socketpair()
+        raw = _make_packet(terminator=0xFF)
+        await trio.SocketStream(w).send_all(raw)
+        async with trio.SocketStream(r) as stream:
+            with pytest.raises(ProtocolError, match="Bad terminator"):
+                await aread_packet(stream)
+
+    trio.run(run)

@@ -1,11 +1,12 @@
 import contextlib
 import importlib.metadata
 import os
-import socket
 import sys
 from pathlib import Path
 
 import click
+import trio
+import trio.socket
 from hypothesis import Verbosity
 from hypothesis.configuration import set_hypothesis_home_dir
 
@@ -14,44 +15,30 @@ from hegel.server import run_server_on_connection
 from hegel.test_server import run_test_server
 
 
-class StdioTransport:
-    """Transport that uses stdin/stdout for protocol communication.
+class _StdioStream(trio.abc.Stream):
+    """Wrap stdin/stdout file descriptors as a trio bidirectional stream."""
 
-    Provides the same interface as a socket (recv, sendall, settimeout, close)
-    so it can be used transparently with the existing packet read/write code.
-    """
+    def __init__(self, read_fd: int, write_fd: int):
+        self._read = trio.lowlevel.FdStream(read_fd)
+        self._write = trio.lowlevel.FdStream(write_fd)
 
-    def __init__(self, reader, writer):
-        self._reader = reader
-        self._writer = writer
+    async def receive_some(self, max_bytes: int | None = None) -> bytes:
+        return await self._read.receive_some(max_bytes)
 
-    def recv(self, n):
-        data = self._reader.read(n)
-        if data is None:
-            return b""
-        return data
+    async def send_all(self, data: bytes) -> None:
+        await self._write.send_all(data)
 
-    def sendall(self, data):
-        try:
-            self._writer.write(data)
-            self._writer.flush()
-        except ValueError as e:
-            # BufferedWriter raises ValueError("I/O operation on closed file")
-            # but the protocol layer only catches OSError.
-            print(f"StdioTransport write failed: {e}", file=sys.stderr)
-            raise OSError(str(e)) from e
+    async def wait_send_all_might_not_block(self) -> None:  # pragma: no cover
+        await self._write.wait_send_all_might_not_block()
 
-    def settimeout(self, timeout):
-        pass  # No timeout support for stdio
+    async def send_eof(self) -> None:  # pragma: no cover
+        await self._write.aclose()
 
-    def shutdown(self, how):
-        pass  # No-op for stdio; closing the fds is sufficient
-
-    def close(self):
+    async def aclose(self) -> None:
         with contextlib.suppress(OSError):
-            self._writer.close()
+            await self._read.aclose()
         with contextlib.suppress(OSError):
-            self._reader.close()
+            await self._write.aclose()
 
 
 @click.command()
@@ -79,7 +66,7 @@ def main(socket_path, stdio, verbosity):
     if stdio:
         if socket_path is not None:
             raise click.UsageError("Cannot specify a socket path with --stdio.")
-        run_server_stdio(verbosity=verbosity)
+        trio.run(run_server_stdio, verbosity)
     else:
         if socket_path is None:
             raise click.UsageError("Socket path is required when not using --stdio.")
@@ -89,34 +76,38 @@ def main(socket_path, stdio, verbosity):
         with contextlib.suppress(FileNotFoundError):
             socket_path.unlink()
 
-        run_server(socket_path, verbosity=verbosity)
+        trio.run(run_server, socket_path, verbosity)
 
 
-def run_server(socket_path: Path, *, verbosity: Verbosity = Verbosity.normal) -> None:
+async def run_server(
+    socket_path: Path, verbosity: Verbosity = Verbosity.normal
+) -> None:
     if verbosity >= Verbosity.debug:
         os.environ["HEGEL_PROTOCOL_DEBUG"] = "1"
 
     set_hypothesis_home_dir(".hegel")
 
-    server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server_sock.bind(str(socket_path))
+    server_sock = trio.socket.socket(trio.socket.AF_UNIX, trio.socket.SOCK_STREAM)
+    await server_sock.bind(str(socket_path))
     server_sock.listen(1)
 
     if verbosity >= Verbosity.verbose:
         print(f"Listening on {socket_path}", file=sys.stderr)
 
     try:
-        client_sock, _ = server_sock.accept()
+        client_sock, _ = await server_sock.accept()
 
         if verbosity >= Verbosity.verbose:
             print("Client connected", file=sys.stderr)
 
-        connection = Connection(client_sock, name="Server")
+        stream = trio.SocketStream(client_sock)
         test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
-        if test_mode:
-            run_test_server(connection, test_mode)
-        else:
-            run_server_on_connection(connection)
+        async with trio.open_nursery() as nursery:
+            connection = Connection(stream, nursery=nursery, name="Server")
+            if test_mode:
+                await run_test_server(connection, test_mode)
+            else:
+                await run_server_on_connection(connection)
 
         if verbosity >= Verbosity.verbose:
             print("Client disconnected", file=sys.stderr)
@@ -125,7 +116,7 @@ def run_server(socket_path: Path, *, verbosity: Verbosity = Verbosity.normal) ->
         server_sock.close()
 
 
-def run_server_stdio(*, verbosity: Verbosity = Verbosity.normal) -> None:
+async def run_server_stdio(verbosity: Verbosity = Verbosity.normal) -> None:
     if verbosity >= Verbosity.debug:
         os.environ["HEGEL_PROTOCOL_DEBUG"] = "1"
 
@@ -142,26 +133,23 @@ def run_server_stdio(*, verbosity: Verbosity = Verbosity.normal) -> None:
     # Also redirect Python-level sys.stdout to stderr.
     sys.stdout = sys.stderr
 
-    protocol_reader = os.fdopen(protocol_in_fd, "rb")
-    protocol_writer = os.fdopen(protocol_out_fd, "wb", buffering=0)
-
     if verbosity >= Verbosity.verbose:
         print("Running in stdio mode", file=sys.stderr)
 
-    transport = StdioTransport(protocol_reader, protocol_writer)
-    connection = Connection(transport, name="Server")
+    stream = _StdioStream(protocol_in_fd, protocol_out_fd)
+    test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
+    async with trio.open_nursery() as nursery:
+        connection = Connection(stream, nursery=nursery, name="Server")
+        try:
+            if test_mode:
+                await run_test_server(connection, test_mode)
+            else:
+                await run_server_on_connection(connection)
 
-    try:
-        test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
-        if test_mode:
-            run_test_server(connection, test_mode)
-        else:
-            run_server_on_connection(connection)
-
-        if verbosity >= Verbosity.verbose:
-            print("Client disconnected", file=sys.stderr)
-    finally:
-        connection.close()
+            if verbosity >= Verbosity.verbose:
+                print("Client disconnected", file=sys.stderr)
+        finally:
+            await connection.close()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -15,10 +15,13 @@ Two modes:
 
 import json
 import os
-import socket
+import socket as socket_module
 import sys
 from pathlib import Path
 from threading import Thread
+
+import trio
+import trio.socket
 
 # Add project root to path so we can import the test client.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
@@ -64,12 +67,21 @@ def main():
     test_cases = int(os.environ["CONFORMANCE_TEST_CASES"])
     mode = params["mode"]
 
-    server_socket, client_socket = socket.socketpair()
-    thread = Thread(
-        target=run_server_on_connection,
-        args=(Connection(server_socket),),
-        daemon=True,
-    )
+    server_socket, client_socket = socket_module.socketpair()
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        sock = trio.socket.fromfd(
+            server_fd, socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        os.close(server_fd)
+        stream = trio.SocketStream(sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
     thread.start()
 
     with ClientConnection(client_socket) as conn:

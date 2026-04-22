@@ -1,4 +1,15 @@
+import contextlib
+import os
+import socket as socket_module
+import threading
+from collections.abc import Callable, Coroutine
+from typing import Any
+
+import trio
+import trio.socket
 from hypothesis import HealthCheck, Phase, given, settings as Settings
+
+from hegel.protocol import Connection
 
 
 class Found(Exception):
@@ -22,3 +33,59 @@ def find_any(strategy, condition, *, settings=None):
     except Found:
         return
     raise AssertionError("No example found satisfying condition")
+
+
+@contextlib.contextmanager
+def run_trio_server(
+    server_socket: socket_module.socket,
+    async_fn: Callable[[Connection], Coroutine[Any, Any, None]],
+    *,
+    name: str | None = None,
+    debug: bool | None = None,
+):
+    """Run an async function with a Connection in a background trio thread.
+
+    Yields the background thread. Joins it (up to 5 s) on exit and re-raises
+    any exception that occurred on the server side.
+
+    Usage::
+
+        async def server_side(conn):
+            await conn.receive_handshake()
+            ...
+
+        def test_something(socket_pair):
+            server_socket, client_socket = socket_pair
+            with run_trio_server(server_socket, server_side) as t:
+                with ClientConnection(client_socket) as client_conn:
+                    client_conn.send_handshake()
+    """
+    errors: list[BaseException] = []
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _main():
+        try:
+            sock = trio.socket.fromfd(
+                server_fd, socket_module.AF_UNIX, socket_module.SOCK_STREAM
+            )
+            os.close(server_fd)
+            stream = trio.SocketStream(sock)
+            async with trio.open_nursery() as nursery:
+                conn = Connection(stream, nursery=nursery, name=name, debug=debug)
+                try:
+                    await async_fn(conn)
+                finally:
+                    await conn.close()
+        except BaseException as e:
+            errors.append(e)
+
+    t = threading.Thread(target=trio.run, args=(_main,), daemon=True)
+    t.start()
+    try:
+        yield t
+    finally:
+        t.join(timeout=5)
+    if errors:
+        raise errors[0]

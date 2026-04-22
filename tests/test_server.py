@@ -1,11 +1,14 @@
 """Tests for server.py uncovered paths."""
 
+import os
 import socket
 import sys
 import time
 from threading import Thread
 
 import pytest
+import trio
+import trio.socket
 from hypothesis import strategies as st
 from hypothesis.errors import UnsatisfiedAssumption
 
@@ -138,45 +141,54 @@ def test_unsatisfied_assumption_in_handler(client, monkeypatch):
 
 
 def test_future_cancel_on_connection_error(monkeypatch):
-    """Test that pending futures with ConnectionError are cancelled.
+    """Test that ConnectionError raised by _run_test is handled cleanly.
 
-    Tests the except (ConnectionError, TimeoutError): f.cancel() branch
-    in run_server_on_connection's cleanup. We patch _run_one to raise
-    ConnectionError, ensuring f.result() deterministically hits that path.
+    Patches _run_test with an async function that raises ConnectionError to verify
+    the server exits cleanly when a test task fails with a connection error.
     """
     server_socket, client_socket = socket.socketpair()
 
-    def raise_connection_error(*args, **kwargs):
+    async def raise_connection_error(*args, **kwargs):
         raise ConnectionError("test disconnect")
 
     monkeypatch.setattr("hegel.server._run_test", raise_connection_error)
-    thread = Thread(
-        target=run_server_on_connection,
-        args=(Connection(server_socket),),
-        daemon=True,
-    )
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
     thread.start()
 
     with ClientConnection(client_socket) as client_connection:
         client = Client(client_connection)
         stream = client_connection.new_stream()
-        client._control.send_request(
-            {
-                "command": "run_test",
-                "stream_id": stream.stream_id,
-                "test_cases": 100,
-            },
-        )
+        try:
+            client._control.send_request(
+                {
+                    "command": "run_test",
+                    "stream_id": stream.stream_id,
+                    "test_cases": 100,
+                },
+            )
+        except ConnectionError:
+            pass  # Server may close before replying if _run_test raises immediately
 
     thread.join(timeout=10)
 
 
 def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
-    """Tests the except Exception handler in _run_one that prints traceback.
+    """Tests the except Exception handler in _run_test that prints traceback.
 
-    When an unexpected exception occurs inside _run_one (e.g., during
-    ConjectureRunner.run()), it's caught, the traceback is printed,
-    and the exception is re-raised.
+    When an unexpected exception occurs inside _run_test (e.g., during
+    ConjectureRunner.run()), it's caught and the traceback is printed.
     """
     server_socket, client_socket = socket.socketpair()
 
@@ -184,11 +196,19 @@ def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
         raise RuntimeError("simulated runner failure")
 
     monkeypatch.setattr("hegel.server.ConjectureRunner.run", raise_runtime_error)
-    thread = Thread(
-        target=run_server_on_connection,
-        args=(Connection(server_socket),),
-        daemon=True,
-    )
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
     thread.start()
 
     with ClientConnection(client_socket) as client_connection:
@@ -205,33 +225,84 @@ def test_exception_in_run_one_is_printed_and_reraised(monkeypatch):
     thread.join(timeout=10)
 
 
+def test_connection_error_from_run_test_sync_is_suppressed(monkeypatch):
+    """Tests that ConnectionError raised by _run_test_sync is silently discarded.
+
+    When _run_test_sync raises ConnectionError (e.g., because the connection
+    dropped mid-run), _run_test catches it and continues silently. This covers
+    the except (ConnectionError, OSError): pass branch in _run_test.
+    """
+    server_socket, client_socket = socket.socketpair()
+
+    def raise_connection_error(*args, **kwargs):
+        raise ConnectionError("simulated mid-run disconnect")
+
+    monkeypatch.setattr("hegel.server._run_test_sync", raise_connection_error)
+
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
+
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
+    thread.start()
+
+    with ClientConnection(client_socket) as client_connection:
+        client = Client(client_connection)
+        stream = client_connection.new_stream()
+        try:
+            client._control.send_request(
+                {
+                    "command": "run_test",
+                    "stream_id": stream.stream_id,
+                    "test_cases": 10,
+                },
+            )
+        except ConnectionError:
+            pass
+
+    thread.join(timeout=10)
+
+
 def test_base_exception_in_server():
     """Test that BaseException in server loop is caught and printed.
 
     Tests the except BaseException handler in run_server_on_connection's main
     loop, which catches non-ConnectionError exceptions and prints the traceback.
-    We let the handshake complete normally, then patch receive_request to raise
+    We let the handshake complete normally, then patch read_request to raise
     KeyboardInterrupt on the next call (the main loop).
     """
     server_socket, client_socket = socket.socketpair()
-    server_conn = Connection(server_socket)
+    server_fd = os.dup(server_socket.fileno())
+    server_socket.close()
 
-    original_receive = server_conn.control_stream.read_request
-    call_count = 0
+    async def _run_server():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
 
-    def patched_receive(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count > 1:
-            raise KeyboardInterrupt("simulated")
-        return original_receive(*args, **kwargs)
+            original_receive = conn.control_stream.read_request
+            call_count = 0
 
-    def server():
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(server_conn.control_stream, "read_request", patched_receive)
-            run_server_on_connection(server_conn)
+            async def patched_receive(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count > 1:
+                    raise KeyboardInterrupt("simulated")
+                return await original_receive(*args, **kwargs)
 
-    thread = Thread(target=server, daemon=True)
+            conn.control_stream.read_request = patched_receive
+            await run_server_on_connection(conn)
+
+    thread = Thread(target=trio.run, args=(_run_server,), daemon=True)
     thread.start()
 
     with ClientConnection(client_socket) as client_conn:

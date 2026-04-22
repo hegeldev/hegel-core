@@ -11,11 +11,12 @@ from pathlib import Path
 from threading import Thread
 
 import pytest
+import trio
 from click.testing import CliRunner
 from hypothesis import Verbosity
 
-from hegel.__main__ import StdioTransport, main, run_server_stdio
-from tests.client import Client, ClientConnection
+from hegel.__main__ import main, run_server_stdio
+from tests.client import Client, ClientConnection, StdioTransport
 
 
 @pytest.fixture
@@ -193,9 +194,13 @@ def test_cli_stdio_with_socket_path():
 
 def test_cli_stdio_calls_run_server_stdio(monkeypatch):
     called = []
+
+    async def fake_run_server_stdio(verbosity):
+        called.append(verbosity)
+
     monkeypatch.setattr(
         "hegel.__main__.run_server_stdio",
-        lambda **kwargs: called.append(kwargs),
+        fake_run_server_stdio,
     )
     result = CliRunner().invoke(main, ["--stdio"])
     assert result.exit_code == 0
@@ -241,8 +246,8 @@ def _run_stdio_test(*, verbosity="normal", env=None):
     try:
         with _redirect_stdio_to_pipes() as (client_read_fd, client_write_fd):
             thread = Thread(
-                target=run_server_stdio,
-                kwargs={"verbosity": Verbosity(verbosity)},
+                target=trio.run,
+                args=(run_server_stdio, Verbosity(verbosity)),
                 daemon=True,
             )
             thread.start()

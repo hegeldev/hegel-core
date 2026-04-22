@@ -37,12 +37,12 @@ dependencies = [
     "cbor2>=5.8.0",
     "click>=8.3.1",
     "hypothesis>=6.148.5",
+    "trio>=0.27.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==9.0.2",
-    "pytest-asyncio==1.3.0",
     "mypy==1.19.1",
     "coverage==7.13.4",
     "ruff==0.15.6",
@@ -111,7 +111,9 @@ ignore = [
     "E721",
     "E731",
     "E741",
+    "ASYNC109",  # timeout param in async fn — we use trio.move_on_after() internally
     "FBT001",
+    "FBT002",
     "FBT003",
     "PD011",
     "PIE790",  # See https://github.com/astral-sh/ruff/issues/10538

@@ -1,9 +1,12 @@
 """Tests for the test server error simulation modes."""
 
+import os
 import socket
 from threading import Thread
 
 import cbor2
+import trio
+import trio.socket
 
 from hegel.protocol.connection import Connection
 from hegel.test_server import run_test_server
@@ -17,8 +20,47 @@ def _create_socket_pair():
 
 def _start_server(server_sock, mode):
     """Start test server in a thread and return the thread."""
-    conn = Connection(server_sock)
-    t = Thread(target=run_test_server, args=(conn, mode), daemon=True)
+    server_fd = os.dup(server_sock.fileno())
+    server_sock.close()
+
+    async def _run():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            try:
+                await run_test_server(conn, mode)
+            finally:
+                await conn.close()
+
+    t = Thread(target=trio.run, args=(_run,), daemon=True)
+    t.start()
+    return t
+
+
+def _start_server_catching(server_sock, mode, errors, catch_types=(ValueError,)):
+    """Start test server in a thread, catching specified exceptions into errors."""
+    server_fd = os.dup(server_sock.fileno())
+    server_sock.close()
+
+    async def _run():
+        trio_sock = trio.socket.fromfd(server_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+        os.close(server_fd)
+        stream = trio.SocketStream(trio_sock)
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery, name="Server")
+            try:
+                await run_test_server(conn, mode)
+            except BaseException as e:
+                if isinstance(e, catch_types):
+                    errors.append(e)
+                else:
+                    raise
+            finally:
+                await conn.close()
+
+    t = Thread(target=trio.run, args=(_run,), daemon=True)
     t.start()
     return t
 
@@ -290,23 +332,16 @@ class TestConnectionErrorHandling:
     def test_server_handles_connection_error_from_stream(self):
         """Tests the except ConnectionError handler in run_test_server.
 
-        Closing the server's Connection puts SHUTDOWN in stream queues,
-        causing ConnectionError when the handler tries to read/write.
+        Closing the client connection causes the server's reader loop to detect
+        EOF, closing all stream channels and raising ConnectionError in the handler.
         """
         s1, s2 = _create_socket_pair()
-        server_conn = Connection(s1)
-        server_thread = Thread(
-            target=run_test_server,
-            args=(server_conn, "stop_test_on_generate"),
-            daemon=True,
-        )
-        server_thread.start()
+        server_thread = _start_server(s1, "stop_test_on_generate")
 
         conn = _setup_client(s2)
         _send_run_test(conn)
-        # Close the server connection, putting SHUTDOWN in all streams.
-        # The handler will get ConnectionError when it tries to use a stream.
-        server_conn.close()
+        # Close the client connection — server detects EOF and raises ConnectionError.
+        conn.close()
 
         server_thread.join(timeout=5.0)
 
@@ -397,15 +432,25 @@ class TestCrashAfterHandshake:
         """Server completes handshake then exits with code 1."""
         s1, s2 = _create_socket_pair()
         exit_codes = []
+        server_fd = os.dup(s1.fileno())
+        s1.close()
 
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "crash_after_handshake")
-            except SystemExit as e:
-                exit_codes.append(e.code)
+        async def _run():
+            trio_sock = trio.socket.fromfd(
+                server_fd, socket.AF_UNIX, socket.SOCK_STREAM
+            )
+            os.close(server_fd)
+            stream = trio.SocketStream(trio_sock)
+            async with trio.open_nursery() as nursery:
+                conn = Connection(stream, nursery=nursery, name="Server")
+                try:
+                    await run_test_server(conn, "crash_after_handshake")
+                except SystemExit as e:
+                    exit_codes.append(e.code)
+                finally:
+                    await conn.close()
 
-        server_thread = Thread(target=run, daemon=True)
+        server_thread = Thread(target=trio.run, args=(_run,), daemon=True)
         server_thread.start()
 
         with _setup_client(s2):
@@ -418,15 +463,25 @@ class TestCrashAfterHandshake:
         """Server writes error to stderr then exits with code 1."""
         s1, s2 = _create_socket_pair()
         exit_codes = []
+        server_fd = os.dup(s1.fileno())
+        s1.close()
 
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "crash_after_handshake_with_stderr")
-            except SystemExit as e:
-                exit_codes.append(e.code)
+        async def _run():
+            trio_sock = trio.socket.fromfd(
+                server_fd, socket.AF_UNIX, socket.SOCK_STREAM
+            )
+            os.close(server_fd)
+            stream = trio.SocketStream(trio_sock)
+            async with trio.open_nursery() as nursery:
+                conn = Connection(stream, nursery=nursery, name="Server")
+                try:
+                    await run_test_server(conn, "crash_after_handshake_with_stderr")
+                except SystemExit as e:
+                    exit_codes.append(e.code)
+                finally:
+                    await conn.close()
 
-        server_thread = Thread(target=run, daemon=True)
+        server_thread = Thread(target=trio.run, args=(_run,), daemon=True)
         server_thread.start()
 
         with _setup_client(s2):
@@ -439,35 +494,17 @@ class TestCrashAfterHandshake:
 class TestTestServerErrors:
     def test_unknown_mode_raises(self):
         s1, s2 = _create_socket_pair()
-        with Connection(s1) as conn:
-            errors = []
+        errors = []
+        t = _start_server_catching(s1, "nonexistent_mode", errors)
 
-            def run():
-                try:
-                    run_test_server(conn, "nonexistent_mode")
-                except ValueError as e:
-                    errors.append(e)
+        with _setup_client(s2):
+            # The server raises ValueError before reading run_test (unknown mode),
+            # so just completing the handshake is enough to trigger the error.
+            pass
 
-            t = Thread(target=run, daemon=True)
-            t.start()
-
-            with _setup_client(s2) as client:
-                # Send run_test but don't wait for response — the server will
-                # raise ValueError after receiving it, closing the connection.
-                test_stream = client.new_stream()
-                client.control_stream.write_request(
-                    cbor2.dumps(
-                        {
-                            "command": "run_test",
-                            "test_cases": 1,
-                            "stream_id": test_stream.stream_id,
-                        },
-                    ),
-                )
-
-            t.join(timeout=5.0)
-            assert len(errors) == 1
-            assert "nonexistent_mode" in str(errors[0])
+        t.join(timeout=5.0)
+        assert len(errors) == 1
+        assert "nonexistent_mode" in str(errors[0])
 
 
 class TestTestServerCommandValidation:
@@ -475,16 +512,7 @@ class TestTestServerCommandValidation:
         """Test that sending a non-run_test command raises ValueError."""
         s1, s2 = _create_socket_pair()
         errors = []
-
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "empty_test")
-            except ValueError as e:
-                errors.append(e)
-
-        t = Thread(target=run, daemon=True)
-        t.start()
+        t = _start_server_catching(s1, "empty_test", errors)
 
         with _setup_client(s2) as conn:
             conn.control_stream.write_request(
@@ -499,16 +527,7 @@ class TestTestServerCommandValidation:
         """Test _handle_normal_generate raises when client sends wrong command."""
         s1, s2 = _create_socket_pair()
         errors = []
-
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "stop_test_on_generate")
-            except ValueError as e:
-                errors.append(e)
-
-        t = Thread(target=run, daemon=True)
-        t.start()
+        t = _start_server_catching(s1, "stop_test_on_generate", errors)
 
         with _setup_client(s2) as conn:
             test_stream = _send_run_test(conn)
@@ -527,16 +546,7 @@ class TestTestServerCommandValidation:
         """Test _wait_for_mark_complete raises when client sends wrong command."""
         s1, s2 = _create_socket_pair()
         errors = []
-
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "stop_test_on_mark_complete")
-            except ValueError as e:
-                errors.append(e)
-
-        t = Thread(target=run, daemon=True)
-        t.start()
+        t = _start_server_catching(s1, "stop_test_on_mark_complete", errors)
 
         with _setup_client(s2) as conn:
             test_stream = _send_run_test(conn)
@@ -554,16 +564,7 @@ class TestTestServerCommandValidation:
         """Test _mode_stop_test_on_generate raises for wrong command on 2nd test case."""
         s1, s2 = _create_socket_pair()
         errors = []
-
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "stop_test_on_generate")
-            except ValueError as e:
-                errors.append(e)
-
-        t = Thread(target=run, daemon=True)
-        t.start()
+        t = _start_server_catching(s1, "stop_test_on_generate", errors)
 
         with _setup_client(s2) as conn:
             test_stream = _send_run_test(conn)
@@ -586,16 +587,7 @@ class TestTestServerCommandValidation:
         """Test _mode_error_response raises for wrong command."""
         s1, s2 = _create_socket_pair()
         errors = []
-
-        def run():
-            conn = Connection(s1)
-            try:
-                run_test_server(conn, "error_response")
-            except ValueError as e:
-                errors.append(e)
-
-        t = Thread(target=run, daemon=True)
-        t.start()
+        t = _start_server_catching(s1, "error_response", errors)
 
         with _setup_client(s2) as conn:
             test_stream = _send_run_test(conn)

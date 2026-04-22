@@ -3,6 +3,9 @@ import struct
 import zlib
 from dataclasses import dataclass
 
+import trio
+import trio.abc
+
 from hegel.protocol.utils import (
     ConnectionClosedError,
     MessageId,
@@ -81,6 +84,58 @@ class Packet:
     payload: bytes
 
 
+def _decode_raw_packet(header: bytes, payload: bytes) -> Packet:
+    """Shared parsing logic for sync and async packet reading."""
+    magic, checksum, stream, message_id, _length = struct.unpack(
+        PACKET_HEADER_FORMAT, header
+    )
+    if magic != PACKET_MAGIC:
+        raise ProtocolError(
+            f"Bad magic: expected 0x{PACKET_MAGIC:08X}, got 0x{magic:08X}"
+        )
+
+    is_reply = (message_id & REPLY_BIT) != 0
+    if is_reply:
+        message_id ^= REPLY_BIT
+
+    zeroed_header = header[:4] + b"\x00\x00\x00\x00" + header[8:]
+    if zlib.crc32(zeroed_header + payload) != checksum:
+        raise ProtocolError("Packet checksum mismatch")
+
+    return Packet(
+        stream_id=stream,
+        message_id=message_id,
+        payload=payload,
+        is_reply=is_reply,
+    )
+
+
+def _encode_packet(packet: Packet) -> bytes:
+    """Serialize a packet to bytes (shared by sync and async writers)."""
+    message_id: int = packet.message_id
+    if packet.is_reply:
+        message_id |= REPLY_BIT
+
+    zeroed_header = struct.pack(
+        ">5I", PACKET_MAGIC, 0, packet.stream_id, message_id, len(packet.payload)
+    )
+    checksum = zlib.crc32(zeroed_header + packet.payload)
+    header = struct.pack(
+        ">5I",
+        PACKET_MAGIC,
+        checksum,
+        packet.stream_id,
+        message_id,
+        len(packet.payload),
+    )
+    return header + packet.payload + bytes([PACKET_TERMINATOR])
+
+
+# ---------------------------------------------------------------------------
+# Synchronous API (used by the test client in tests/client/)
+# ---------------------------------------------------------------------------
+
+
 def read_exact(sock: socket.socket, *, n: int) -> bytes:
     """Read exactly n bytes from the socket."""
     if n < 0:
@@ -141,23 +196,53 @@ def read_packet(sock: socket.socket, *, timeout: float | None = None) -> Packet:
 
 
 def write_packet(sock: socket.socket, packet: Packet) -> None:
-    message_id: int = packet.message_id
-    if packet.is_reply:
-        message_id |= REPLY_BIT
+    sock.sendall(_encode_packet(packet))
 
-    # checksum is defined as crc(header + payload), where the header's checksum has
-    # been zeroed
-    zeroed_header = struct.pack(
-        ">5I", PACKET_MAGIC, 0, packet.stream_id, message_id, len(packet.payload)
-    )
-    checksum = zlib.crc32(zeroed_header + packet.payload)
 
-    zeroed_header = struct.pack(
-        ">5I",
-        PACKET_MAGIC,
-        checksum,
-        packet.stream_id,
-        message_id,
-        len(packet.payload),
+# ---------------------------------------------------------------------------
+# Async API (used by the trio-based server)
+# ---------------------------------------------------------------------------
+
+
+async def aread_exact(stream: trio.abc.ReceiveStream, *, n: int) -> bytes:
+    """Read exactly n bytes from a trio receive stream."""
+    if n < 0:
+        raise ValueError(f"aread_exact: n must be non-negative, got {n}")
+    if n == 0:
+        return b""
+
+    data = bytearray()
+    while len(data) < n:
+        chunk = await stream.receive_some(n - len(data))
+        if chunk:
+            data.extend(chunk)
+            continue
+
+        if not data:
+            raise ConnectionClosedError("Connection closed")
+        raise ProtocolError(
+            f"Connection closed during socket read (bytes read so far: {data!r})"
+        )
+    return bytes(data)
+
+
+async def aread_packet(stream: trio.abc.ReceiveStream) -> Packet:
+    """Read one packet from a trio receive stream."""
+    header_size = struct.calcsize(PACKET_HEADER_FORMAT)
+    header = await aread_exact(stream, n=header_size)
+    _magic, _checksum, _stream_id, _message_id, length = struct.unpack(
+        PACKET_HEADER_FORMAT, header
     )
-    sock.sendall(zeroed_header + packet.payload + bytes([PACKET_TERMINATOR]))
+    payload = await aread_exact(stream, n=length)
+    terminator_byte = await aread_exact(stream, n=1)
+    terminator = terminator_byte[0]
+    if terminator != PACKET_TERMINATOR:
+        raise ProtocolError(
+            f"Bad terminator: expected 0x{PACKET_TERMINATOR:02X}, got 0x{terminator:02X}"
+        )
+    return _decode_raw_packet(header, payload)
+
+
+async def awrite_packet(stream: trio.abc.SendStream, packet: Packet) -> None:
+    """Write one packet to a trio send stream."""
+    await stream.send_all(_encode_packet(packet))
