@@ -85,7 +85,9 @@ async def run_server_stdio(verbosity: Verbosity = Verbosity.normal) -> None:
     )
     test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
     async with trio.open_nursery() as nursery:
-        connection = Connection(receive_stream, send_stream, nursery=nursery, name="Server")
+        connection = Connection(
+            receive_stream, send_stream, nursery=nursery, name="Server"
+        )
         try:
             if test_mode:
                 try:

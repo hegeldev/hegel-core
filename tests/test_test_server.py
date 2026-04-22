@@ -8,8 +8,8 @@ import trio
 import trio.socket
 
 from hegel.protocol.connection import Connection
-from tests.test_server_modes import run_test_server
 from tests.client import ClientConnection
+from tests.test_server_modes import run_test_server
 
 
 def _create_socket_pair():

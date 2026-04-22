@@ -191,10 +191,14 @@ class Connection:
                     file=sys.stderr,
                 )
         finally:
-            with contextlib.suppress(OSError, trio.ClosedResourceError, trio.BrokenResourceError):
+            with contextlib.suppress(
+                OSError, trio.ClosedResourceError, trio.BrokenResourceError
+            ):
                 await self._send_stream.aclose()
             if self._receive_stream is not self._send_stream:  # type: ignore[comparison-overlap]
-                with contextlib.suppress(OSError, trio.ClosedResourceError, trio.BrokenResourceError):
+                with contextlib.suppress(
+                    OSError, trio.ClosedResourceError, trio.BrokenResourceError
+                ):
                     await self._receive_stream.aclose()
             if self.running:
                 await self.close()

@@ -977,7 +977,9 @@ def test_writer_loop_exception_closes_connection(socket, monkeypatch, capsys):
     assert "Writer loop exiting" in capsys.readouterr().err
 
 
-def test_writer_loop_exception_suppressed_when_already_closed(socket, monkeypatch, capsys):
+def test_writer_loop_exception_suppressed_when_already_closed(
+    socket, monkeypatch, capsys
+):
     """Writer loop suppresses error message when connection was already closed."""
 
     async def always_fail(stream, packet):
