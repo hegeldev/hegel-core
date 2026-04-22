@@ -1,4 +1,3 @@
-import socket
 import struct
 import zlib
 from dataclasses import dataclass
@@ -85,7 +84,7 @@ class Packet:
 
 
 def _decode_raw_packet(header: bytes, payload: bytes) -> Packet:
-    """Shared parsing logic for sync and async packet reading."""
+    """Parse a raw header+payload into a Packet."""
     magic, checksum, stream, message_id, _length = struct.unpack(
         PACKET_HEADER_FORMAT, header
     )
@@ -111,7 +110,7 @@ def _decode_raw_packet(header: bytes, payload: bytes) -> Packet:
 
 
 def _encode_packet(packet: Packet) -> bytes:
-    """Serialize a packet to bytes (shared by sync and async writers)."""
+    """Serialize a packet to bytes."""
     message_id: int = packet.message_id
     if packet.is_reply:
         message_id |= REPLY_BIT
@@ -129,79 +128,6 @@ def _encode_packet(packet: Packet) -> bytes:
         len(packet.payload),
     )
     return header + packet.payload + bytes([PACKET_TERMINATOR])
-
-
-# ---------------------------------------------------------------------------
-# Synchronous API (used by the test client in tests/client/)
-# ---------------------------------------------------------------------------
-
-
-def read_exact(sock: socket.socket, *, n: int) -> bytes:
-    """Read exactly n bytes from the socket."""
-    if n < 0:
-        raise ValueError(f"read_exact: n must be non-negative, got {n}")
-    if n == 0:
-        return b""
-
-    data = bytearray()
-    while len(data) < n:
-        chunk = sock.recv(n - len(data))
-        if chunk:
-            data.extend(chunk)
-            continue
-
-        if not data:
-            raise ConnectionClosedError("Connection closed")
-        raise ProtocolError(
-            f"Connection closed during socket read (bytes read so far: {data!r})"
-        )
-    return bytes(data)
-
-
-def read_packet(sock: socket.socket, *, timeout: float | None = None) -> Packet:
-    sock.settimeout(timeout)
-    header = read_exact(sock, n=struct.calcsize(PACKET_HEADER_FORMAT))
-    sock.settimeout(None)
-    magic, checksum, stream, message_id, length = struct.unpack(
-        PACKET_HEADER_FORMAT, header
-    )
-    if magic != PACKET_MAGIC:
-        raise ProtocolError(
-            f"Bad magic: expected 0x{PACKET_MAGIC:08X}, got 0x{magic:08X}"
-        )
-
-    is_reply = (message_id & REPLY_BIT) != 0
-    if is_reply:
-        message_id ^= REPLY_BIT
-
-    payload = read_exact(sock, n=length)
-    terminator = read_exact(sock, n=1)[0]
-    if terminator != PACKET_TERMINATOR:
-        raise ProtocolError(
-            f"Bad terminator: expected 0x{PACKET_TERMINATOR:02X}, got 0x{terminator:02X}"
-        )
-
-    # checksum is defined as crc(header + payload), where the header's checksum has
-    # been zeroed
-    zeroed_header = header[:4] + b"\x00\x00\x00\x00" + header[8:]
-    if zlib.crc32(zeroed_header + payload) != checksum:
-        raise ProtocolError("Packet checksum mismatch")
-
-    return Packet(
-        stream_id=stream,
-        message_id=message_id,
-        payload=payload,
-        is_reply=is_reply,
-    )
-
-
-def write_packet(sock: socket.socket, packet: Packet) -> None:
-    sock.sendall(_encode_packet(packet))
-
-
-# ---------------------------------------------------------------------------
-# Async API (used by the trio-based server)
-# ---------------------------------------------------------------------------
 
 
 async def aread_exact(stream: trio.abc.ReceiveStream, *, n: int) -> bytes:

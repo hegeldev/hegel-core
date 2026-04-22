@@ -15,11 +15,9 @@ from hegel.protocol.packet import (
     TrioBufferedReader,
     aread_exact,
     aread_packet,
-    read_exact,
-    read_packet,
-    write_packet,
 )
 from hegel.protocol.utils import ConnectionClosedError
+from tests.client.protocol import read_exact, read_packet, write_packet
 
 
 def packets():

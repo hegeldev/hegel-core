@@ -360,7 +360,8 @@ def test_stream_repr_variations(socket_pair, conn_name, role, expected):
 
 def test_request_to_closed_stream_gets_error_reply(socket_pair):
     """Sending a request to a server-closed stream gets an error reply."""
-    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, read_packet
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD
+    from tests.client.protocol import read_packet
 
     server_socket, client_socket = socket_pair
 
@@ -401,7 +402,7 @@ def test_request_to_closed_stream_gets_error_reply(socket_pair):
 
 def test_request_for_unknown_stream_gets_error_reply(socket_pair):
     """A request on an unregistered stream_id gets an error reply."""
-    from hegel.protocol.packet import read_packet, write_packet
+    from tests.client.protocol import read_packet, write_packet
 
     server_socket, client_socket = socket_pair
 
@@ -461,7 +462,7 @@ def test_send_error_reply_swallows_oserror_on_closed_connection(socket_pair):
 
 def test_reply_for_unknown_stream_is_silently_discarded(socket_pair):
     """A reply packet on an unregistered stream is discarded with no response."""
-    from hegel.protocol.packet import write_packet
+    from tests.client.protocol import write_packet
 
     server_socket, client_socket = socket_pair
 
@@ -493,7 +494,7 @@ def test_reply_for_unknown_stream_is_silently_discarded(socket_pair):
 
 def test_error_reply_write_failure_is_suppressed(socket_pair):
     """If sending the error reply fails, the reader loop continues."""
-    from hegel.protocol.packet import write_packet as _write_packet
+    from tests.client.protocol import write_packet as _write_packet
 
     server_socket, client_socket = socket_pair
 
@@ -536,8 +537,9 @@ def test_error_reply_write_failure_is_suppressed(socket_pair):
 
 def test_close_packet_with_wrong_message_id_is_discarded(socket_pair):
     """A close-stream payload with the wrong message_id is silently discarded."""
-    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD, write_packet
+    from hegel.protocol.packet import CLOSE_STREAM_PAYLOAD
     from hegel.protocol.utils import StreamId
+    from tests.client.protocol import write_packet
 
     server_socket, client_socket = socket_pair
 
@@ -622,7 +624,7 @@ def test_close_stream_marks_closed(socket_pair, create_stream_first):
 
 def test_duplicate_reply_warns_on_stderr(socket_pair, capsys):
     """Duplicate replies for same ID print a warning instead of crashing."""
-    from hegel.protocol.packet import write_packet
+    from tests.client.protocol import write_packet
 
     server_socket, client_socket = socket_pair
 

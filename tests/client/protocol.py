@@ -1,5 +1,7 @@
 import contextlib
 import socket
+import struct
+import zlib
 from collections import defaultdict, deque
 from typing import Any
 
@@ -10,17 +12,96 @@ from hegel.protocol.connection import HANDSHAKE_STRING
 from hegel.protocol.packet import (
     CLOSE_STREAM_MESSAGE_ID,
     CLOSE_STREAM_PAYLOAD,
+    PACKET_HEADER_FORMAT,
+    PACKET_MAGIC,
+    PACKET_TERMINATOR,
+    REPLY_BIT,
     Packet,
-    read_packet,
-    write_packet,
 )
 from hegel.protocol.utils import (
+    ConnectionClosedError,
     MessageId,
     ProtocolError,
     RequestError,
     StreamId,
 )
 from hegel.schema import HEGEL_STRING_TAG
+
+
+def read_exact(sock: socket.socket, *, n: int) -> bytes:
+    """Read exactly n bytes from the socket."""
+    if n < 0:
+        raise ValueError(f"read_exact: n must be non-negative, got {n}")
+    if n == 0:
+        return b""
+
+    data = bytearray()
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if chunk:
+            data.extend(chunk)
+            continue
+
+        if not data:
+            raise ConnectionClosedError("Connection closed")
+        raise ProtocolError(
+            f"Connection closed during socket read (bytes read so far: {data!r})"
+        )
+    return bytes(data)
+
+
+def read_packet(sock: socket.socket, *, timeout: float | None = None) -> Packet:
+    sock.settimeout(timeout)
+    header = read_exact(sock, n=struct.calcsize(PACKET_HEADER_FORMAT))
+    sock.settimeout(None)
+    magic, checksum, stream, message_id, length = struct.unpack(
+        PACKET_HEADER_FORMAT, header
+    )
+    if magic != PACKET_MAGIC:
+        raise ProtocolError(
+            f"Bad magic: expected 0x{PACKET_MAGIC:08X}, got 0x{magic:08X}"
+        )
+
+    is_reply = (message_id & REPLY_BIT) != 0
+    if is_reply:
+        message_id ^= REPLY_BIT
+
+    payload = read_exact(sock, n=length)
+    terminator = read_exact(sock, n=1)[0]
+    if terminator != PACKET_TERMINATOR:
+        raise ProtocolError(
+            f"Bad terminator: expected 0x{PACKET_TERMINATOR:02X}, got 0x{terminator:02X}"
+        )
+
+    zeroed_header = header[:4] + b"\x00\x00\x00\x00" + header[8:]
+    if zlib.crc32(zeroed_header + payload) != checksum:
+        raise ProtocolError("Packet checksum mismatch")
+
+    return Packet(
+        stream_id=stream,
+        message_id=message_id,
+        payload=payload,
+        is_reply=is_reply,
+    )
+
+
+def write_packet(sock: socket.socket, packet: Packet) -> None:
+    message_id: int = packet.message_id
+    if packet.is_reply:
+        message_id |= REPLY_BIT
+    zeroed_header = struct.pack(
+        ">5I", PACKET_MAGIC, 0, packet.stream_id, message_id, len(packet.payload)
+    )
+    checksum = zlib.crc32(zeroed_header + packet.payload)
+    header = struct.pack(
+        ">5I",
+        PACKET_MAGIC,
+        checksum,
+        packet.stream_id,
+        message_id,
+        len(packet.payload),
+    )
+    sock.sendall(header + packet.payload + bytes([PACKET_TERMINATOR]))
 
 
 def _decode_hook(_decoder: object, tag: CBORTag) -> object:
