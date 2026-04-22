@@ -357,7 +357,7 @@ async def run_server_on_connection(connection: Connection) -> None:
                     else:
                         raise ValueError(f"Unknown command: {command}")
             except (ConnectionError, ProtocolError):
-                nursery.cancel_scope.cancel() e8e56c1 (Port hegel-core server to trio structured concurrency)
+                nursery.cancel_scope.cancel()
     except BaseException:
         traceback.print_exc()
     finally:
