@@ -8,7 +8,7 @@ import trio
 import trio.socket
 
 from hegel.protocol.connection import Connection
-from hegel.test_server import run_test_server
+from tests.test_server_modes import run_test_server
 from tests.client import ClientConnection
 
 

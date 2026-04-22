@@ -941,17 +941,34 @@ def test_connection_close_is_idempotent(socket_pair):
 
 
 def test_writer_loop_exception_closes_connection(socket, monkeypatch, capsys):
-    """Writer loop logs and closes connection when awrite_packet raises."""
+    """Writer loop logs and closes connection when awrite_packet raises.
+
+    Uses separate receive/send streams so closing the send stream doesn't race
+    with the reader loop — ensuring the writer loop's finally block reaches
+    `await self.close()` while self.running is still True.
+    """
 
     async def always_fail(stream, packet):
         raise OSError("simulated write failure")
 
     monkeypatch.setattr("hegel.protocol.connection.awrite_packet", always_fail)
 
+    class _ClosableReceiveStream(trio.abc.ReceiveStream):
+        def __init__(self):
+            self._close_event = trio.Event()
+
+        async def receive_some(self, max_bytes=None):
+            await self._close_event.wait()
+            return b""  # EOF after close
+
+        async def aclose(self):
+            self._close_event.set()
+
     async def run():
-        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
+        send_stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
+        receive_stream = _ClosableReceiveStream()
         async with trio.open_nursery() as nursery:
-            conn = Connection(stream, nursery=nursery)
+            conn = Connection(receive_stream, send_stream, nursery=nursery)
             await conn.write_packet(
                 Packet(stream_id=0, message_id=1, is_reply=False, payload=b"x")
             )

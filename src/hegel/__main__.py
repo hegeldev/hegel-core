@@ -2,46 +2,43 @@ import contextlib
 import importlib.metadata
 import os
 import sys
+from typing import Any
 
 import click
 import trio
+import trio.abc
 from hypothesis import Verbosity
 from hypothesis.configuration import set_hypothesis_home_dir
 
 from hegel.protocol.connection import Connection
 from hegel.server import run_server_on_connection
-from hegel.test_server import run_test_server
 
 
-class _StdioStream(trio.abc.Stream):
-    """Wrap stdin/stdout file descriptors as a trio bidirectional stream.
-
-    Uses trio.wrap_file so blocking pipe/file I/O runs in a thread pool,
-    making this work on all platforms including Windows (where
-    trio.lowlevel.FdStream only supports sockets).
-    """
-
-    def __init__(self, read_fd: int, write_fd: int):
-        self._read = trio.wrap_file(os.fdopen(read_fd, "rb", buffering=0))
-        self._write = trio.wrap_file(os.fdopen(write_fd, "wb", buffering=0))
+class _AsyncFileReceiveStream(trio.abc.ReceiveStream):
+    def __init__(self, f: Any) -> None:
+        self._f = f
 
     async def receive_some(self, max_bytes: int | None = None) -> bytes:
-        return await self._read.read(max_bytes or 65536)
+        return await self._f.read(max_bytes or 65536)
+
+    async def aclose(self) -> None:
+        with contextlib.suppress(OSError):
+            await self._f.aclose()
+
+
+class _AsyncFileSendStream(trio.abc.SendStream):
+    def __init__(self, f: Any) -> None:
+        self._f = f
 
     async def send_all(self, data: bytes) -> None:
-        await self._write.write(data)
+        await self._f.write(data)
 
     async def wait_send_all_might_not_block(self) -> None:  # pragma: no cover
         pass
 
-    async def send_eof(self) -> None:  # pragma: no cover
-        await self._write.aclose()
-
     async def aclose(self) -> None:
         with contextlib.suppress(OSError):
-            await self._read.aclose()
-        with contextlib.suppress(OSError):
-            await self._write.aclose()
+            await self._f.aclose()
 
 
 @click.command()
@@ -80,12 +77,24 @@ async def run_server_stdio(verbosity: Verbosity = Verbosity.normal) -> None:
     if verbosity >= Verbosity.verbose:
         print("Running in stdio mode", file=sys.stderr)
 
-    stream = _StdioStream(protocol_in_fd, protocol_out_fd)
+    receive_stream = _AsyncFileReceiveStream(
+        trio.wrap_file(os.fdopen(protocol_in_fd, "rb", buffering=0))
+    )
+    send_stream = _AsyncFileSendStream(
+        trio.wrap_file(os.fdopen(protocol_out_fd, "wb", buffering=0))
+    )
     test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
     async with trio.open_nursery() as nursery:
-        connection = Connection(stream, nursery=nursery, name="Server")
+        connection = Connection(receive_stream, send_stream, nursery=nursery, name="Server")
         try:
             if test_mode:
+                try:
+                    from tests.test_server_modes import run_test_server
+                except ImportError as exc:  # pragma: no cover
+                    raise RuntimeError(
+                        f"HEGEL_PROTOCOL_TEST_MODE={test_mode!r} requires hegel to be "
+                        "run from a development checkout where tests/ is importable"
+                    ) from exc
                 await run_test_server(connection, test_mode)
             else:
                 await run_server_on_connection(connection)

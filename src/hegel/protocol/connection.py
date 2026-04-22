@@ -55,10 +55,9 @@ class Connection:
     A connection can be used simultaneously by multiple tests.
 
     At the lowest level, the protocol is bytes moving across the transport layer. The
-    transport layer is currently unix sockets, though this may change to support windows.
-    Bytes sent over the socket always consist of logical packets (see the Packet class).
-    Packets on the protocol have a stream_id, which logically organizes packets. See the
-    Stream class for details.
+    transport layer is stdin/stdout (pipes). Bytes always consist of logical packets
+    (see the Packet class). Packets on the protocol have a stream_id, which logically
+    organizes packets. See the Stream class for details.
 
     Protocol
     --------
@@ -99,7 +98,8 @@ class Connection:
 
     def __init__(
         self,
-        stream: trio.abc.Stream,
+        receive_stream: trio.abc.ReceiveStream,
+        send_stream: trio.abc.SendStream | None = None,
         *,
         nursery: trio.Nursery,
         name: str | None = None,
@@ -111,8 +111,11 @@ class Connection:
         self.streams: dict[StreamId, Stream] = {}
         self.running = True
 
-        self._stream = stream
-        self._reader = TrioBufferedReader(stream)
+        self._receive_stream = receive_stream
+        self._send_stream: trio.abc.SendStream = (
+            send_stream if send_stream is not None else receive_stream  # type: ignore[assignment]
+        )
+        self._reader = TrioBufferedReader(receive_stream)
         self.__next_stream_id = 1
         self._handshake_done = False
 
@@ -176,7 +179,7 @@ class Connection:
         try:
             async for packet in self._write_recv:
                 self._debug_packet(packet, direction="SEND")
-                await awrite_packet(self._stream, packet)
+                await awrite_packet(self._send_stream, packet)
         except (
             OSError,
             trio.ClosedResourceError,
@@ -189,7 +192,10 @@ class Connection:
                 )
         finally:
             with contextlib.suppress(OSError, trio.ClosedResourceError, trio.BrokenResourceError):
-                await self._stream.aclose()
+                await self._send_stream.aclose()
+            if self._receive_stream is not self._send_stream:  # type: ignore[comparison-overlap]
+                with contextlib.suppress(OSError, trio.ClosedResourceError, trio.BrokenResourceError):
+                    await self._receive_stream.aclose()
             if self.running:
                 await self.close()
 
@@ -280,7 +286,7 @@ class Connection:
         try:
             await self._write_send.send(packet)
         except (trio.ClosedResourceError, trio.BrokenResourceError):
-            raise ConnectionError("Connection closed")
+            raise ConnectionError("Connection closed") from None
 
     async def receive_handshake(self):
         if self._handshake_done:
