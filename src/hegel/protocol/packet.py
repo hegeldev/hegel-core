@@ -246,3 +246,48 @@ async def aread_packet(stream: trio.abc.ReceiveStream) -> Packet:
 async def awrite_packet(stream: trio.abc.SendStream, packet: Packet) -> None:
     """Write one packet to a trio send stream."""
     await stream.send_all(_encode_packet(packet))
+
+
+class TrioBufferedReader:
+    """Buffered reader that minimises receive_some calls.
+
+    Fills an internal bytearray from the stream in large chunks (default 65536
+    bytes), so that subsequent read_exactly calls are served from memory without
+    hitting the event loop. This reduces the number of trio checkpoints from ~6
+    per packet (header + payload + terminator each requiring their own
+    receive_some) to roughly one per 65536 bytes of input.
+    """
+
+    _BUFSIZE = 65536
+
+    def __init__(self, stream: trio.abc.ReceiveStream) -> None:
+        self._stream = stream
+        self._buf = bytearray()
+
+    async def read_exactly(self, n: int) -> bytes:
+        while len(self._buf) < n:
+            chunk = await self._stream.receive_some(self._BUFSIZE)
+            if not chunk:
+                if not self._buf:
+                    raise ConnectionClosedError("Connection closed")
+                raise ProtocolError(
+                    f"Connection closed during socket read"
+                    f" (bytes read so far: {bytes(self._buf)!r})"
+                )
+            self._buf.extend(chunk)
+        result = bytes(self._buf[:n])
+        del self._buf[:n]
+        return result
+
+    async def read_packet(self) -> Packet:
+        header_size = struct.calcsize(PACKET_HEADER_FORMAT)
+        header = await self.read_exactly(header_size)
+        _, _, _, _, length = struct.unpack(PACKET_HEADER_FORMAT, header)
+        payload = await self.read_exactly(length)
+        terminator_byte = await self.read_exactly(1)
+        if terminator_byte[0] != PACKET_TERMINATOR:
+            raise ProtocolError(
+                f"Bad terminator: expected 0x{PACKET_TERMINATOR:02X},"
+                f" got 0x{terminator_byte[0]:02X}"
+            )
+        return _decode_raw_packet(header, payload)

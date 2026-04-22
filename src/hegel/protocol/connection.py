@@ -10,7 +10,7 @@ from hegel.protocol.packet import (
     CLOSE_STREAM_MESSAGE_ID,
     CLOSE_STREAM_PAYLOAD,
     Packet,
-    aread_packet,
+    TrioBufferedReader,
     awrite_packet,
 )
 from hegel.protocol.utils import (
@@ -112,6 +112,7 @@ class Connection:
 
         self.__writer_lock = trio.Lock()
         self._stream = stream
+        self._reader = TrioBufferedReader(stream)
         self.__next_stream_id = 1
         self._handshake_done = False
 
@@ -171,13 +172,11 @@ class Connection:
             if not v.closed:
                 with contextlib.suppress(trio.ClosedResourceError):
                     await v._packet_send.aclose()
-                if v._sync_requests is not None:
-                    v._sync_requests.put(ConnectionError("Connection closed"))
 
     async def _reader_loop(self) -> None:
         try:
             while self.running:
-                packet = await aread_packet(self._stream)
+                packet = await self._reader.read_packet()
 
                 stream = self.streams.get(packet.stream_id)
                 if stream is None:
@@ -201,8 +200,6 @@ class Connection:
                     stream.closed = True
                     with contextlib.suppress(trio.ClosedResourceError):
                         await stream._packet_send.aclose()
-                    if stream._sync_requests is not None:
-                        stream._sync_requests.put(ConnectionError("Connection closed"))
                 else:
                     if stream.closed:
                         self._debug_print(f"Received packet for closed stream {stream}")
@@ -221,10 +218,7 @@ class Connection:
                         )
                     elif packet.is_reply:
                         stream._routed_reply_ids.add(packet.message_id)
-                    if not packet.is_reply and stream._sync_requests is not None:
-                        stream._sync_requests.put(packet)
-                    else:
-                        await stream._packet_send.send(packet)
+                    await stream._packet_send.send(packet)
         except (
             ConnectionClosedError,
             OSError,
