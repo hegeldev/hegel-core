@@ -1,4 +1,4 @@
-RELEASE_TYPE: minor
+RELEASE_TYPE: patch
 
 This release ports the hegel server internals from threading to trio, replacing the reader thread and `ThreadPoolExecutor`-based concurrency model with trio's structured concurrency primitives.
 
