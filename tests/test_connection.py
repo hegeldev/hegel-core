@@ -940,6 +940,47 @@ def test_connection_close_is_idempotent(socket_pair):
         time.sleep(0.2)
 
 
+def test_writer_loop_exception_closes_connection(socket, monkeypatch, capsys):
+    """Writer loop logs and closes connection when awrite_packet raises."""
+
+    async def always_fail(stream, packet):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr("hegel.protocol.connection.awrite_packet", always_fail)
+
+    async def run():
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery)
+            await conn.write_packet(
+                Packet(stream_id=0, message_id=1, is_reply=False, payload=b"x")
+            )
+
+    trio.run(run)
+    assert "Writer loop exiting" in capsys.readouterr().err
+
+
+def test_writer_loop_exception_suppressed_when_already_closed(socket, monkeypatch, capsys):
+    """Writer loop suppresses error message when connection was already closed."""
+
+    async def always_fail(stream, packet):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr("hegel.protocol.connection.awrite_packet", always_fail)
+
+    async def run():
+        stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))
+        async with trio.open_nursery() as nursery:
+            conn = Connection(stream, nursery=nursery)
+            conn.running = False  # simulate already-closed state
+            await conn.write_packet(
+                Packet(stream_id=0, message_id=1, is_reply=False, payload=b"x")
+            )
+
+    trio.run(run)
+    assert "Writer loop exiting" not in capsys.readouterr().err
+
+
 def test_write_packet_after_close_raises(socket):
     async def run():
         stream = trio.SocketStream(trio.socket.from_stdlib_socket(socket))

@@ -61,8 +61,6 @@ class Stream:
         self._routed_reply_ids: set[MessageId] = set()
 
         self.next_message_id = MessageId(1)
-        self._write_lock = trio.Lock()
-        self._close_lock = trio.Lock()
         self.closed = False
 
     def __repr__(self):
@@ -74,10 +72,9 @@ class Stream:
 
     async def close(self) -> None:
         """Close this stream. Writes a close-stream notification packet to the socket."""
-        async with self._close_lock:
-            if self.closed:
-                return
-            self.closed = True
+        if self.closed:
+            return
+        self.closed = True
         with contextlib.suppress(trio.ClosedResourceError):
             await self._packet_send.aclose()
         if self.connection.running:
@@ -128,15 +125,14 @@ class Stream:
 
     async def write_request(self, payload: bytes) -> Packet:
         """Write a request packet to the socket. Returns the packet."""
-        async with self._write_lock:
-            packet = Packet(
-                payload=payload,
-                stream_id=self.stream_id,
-                is_reply=False,
-                message_id=self.next_message_id,
-            )
-            await self.connection.write_packet(packet)
-            self.next_message_id = MessageId(self.next_message_id + 1)
+        packet = Packet(
+            payload=payload,
+            stream_id=self.stream_id,
+            is_reply=False,
+            message_id=self.next_message_id,
+        )
+        self.next_message_id = MessageId(self.next_message_id + 1)
+        await self.connection.write_packet(packet)
         return packet
 
     async def write_reply(self, message_id: MessageId, value: Any) -> None:

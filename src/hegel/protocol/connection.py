@@ -1,4 +1,5 @@
 import contextlib
+import math
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -110,15 +111,17 @@ class Connection:
         self.streams: dict[StreamId, Stream] = {}
         self.running = True
 
-        self.__writer_lock = trio.Lock()
         self._stream = stream
         self._reader = TrioBufferedReader(stream)
         self.__next_stream_id = 1
         self._handshake_done = False
 
+        self._write_send, self._write_recv = trio.open_memory_channel[Packet](math.inf)
+
         # special stream for connection-level commands
         self.control_stream = self._make_stream(StreamId(0), role="Control")
 
+        nursery.start_soon(self._writer_loop)
         nursery.start_soon(self._reader_loop)
 
     async def __aenter__(self):
@@ -159,19 +162,36 @@ class Connection:
 
     async def close(self) -> None:
         """Close the connection and clean up resources."""
-        async with self.__writer_lock:
-            if not self.running:
-                return
-            self.running = False
-            with contextlib.suppress(
-                OSError, trio.ClosedResourceError, trio.BrokenResourceError
-            ):
-                await self._stream.aclose()
-            streams = list(self.streams.values())
+        if not self.running:
+            return
+        self.running = False
+        self._write_send.close()
+        streams = list(self.streams.values())
         for v in streams:
             if not v.closed:
                 with contextlib.suppress(trio.ClosedResourceError):
                     await v._packet_send.aclose()
+
+    async def _writer_loop(self) -> None:
+        try:
+            async for packet in self._write_recv:
+                self._debug_packet(packet, direction="SEND")
+                await awrite_packet(self._stream, packet)
+        except (
+            OSError,
+            trio.ClosedResourceError,
+            trio.BrokenResourceError,
+        ) as exc:
+            if self.running:
+                print(
+                    f"Writer loop exiting: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+        finally:
+            with contextlib.suppress(OSError, trio.ClosedResourceError, trio.BrokenResourceError):
+                await self._stream.aclose()
+            if self.running:
+                await self.close()
 
     async def _reader_loop(self) -> None:
         try:
@@ -257,11 +277,10 @@ class Connection:
             pass
 
     async def write_packet(self, packet: Packet) -> None:
-        async with self.__writer_lock:
-            if not self.running:
-                raise ConnectionError("Connection closed")
-            self._debug_packet(packet, direction="SEND")
-            await awrite_packet(self._stream, packet)
+        try:
+            await self._write_send.send(packet)
+        except (trio.ClosedResourceError, trio.BrokenResourceError):
+            raise ConnectionError("Connection closed")
 
     async def receive_handshake(self):
         if self._handshake_done:
@@ -293,9 +312,8 @@ class Connection:
     async def new_stream(self, *, role: str | None = None) -> "Stream":
         if not self._handshake_done:
             raise ProtocolError("Cannot create streams before handshake")
-        async with self.__writer_lock:
-            stream_id = StreamId(self.__next_stream_id << 1)
-            self.__next_stream_id += 1
+        stream_id = StreamId(self.__next_stream_id << 1)
+        self.__next_stream_id += 1
         return self._make_stream(stream_id, role=role)
 
     async def register_client_stream(
