@@ -1109,7 +1109,7 @@ def test_single_test_case_generation_works(client):
 
 
 def test_connection_error_from_single_test_case_is_suppressed(monkeypatch):
-    """ConnectionError raised inside _single_test_case_sync is silently swallowed."""
+    """ConnectionError raised inside _single_test_case is silently swallowed."""
     from unittest.mock import MagicMock
 
     from hegel.server import _single_test_case
@@ -1126,7 +1126,7 @@ def test_connection_error_from_single_test_case_is_suppressed(monkeypatch):
 
 
 def test_exception_in_single_test_case_is_printed(monkeypatch, capsys):
-    """Non-connection exceptions in _single_test_case_sync are printed and swallowed."""
+    """Non-connection exceptions in _single_test_case are printed and swallowed."""
     from unittest.mock import MagicMock
 
     from hegel.server import _single_test_case

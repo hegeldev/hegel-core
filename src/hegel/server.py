@@ -369,25 +369,6 @@ async def _single_test_case(
     stream: Stream,
     seed: int | None,
 ) -> None:
-    """Run a single test case inside a trio worker thread."""
-    try:
-        await trio.to_thread.run_sync(
-            lambda: _single_test_case_sync(connection, stream, seed=seed),
-            abandon_on_cancel=True,
-        )
-    except (ConnectionError, OSError):
-        pass
-    except Exception:
-        traceback.print_exc()
-
-
-def _single_test_case_sync(
-    connection: Connection,
-    stream: Stream,
-    *,
-    seed: int | None,
-) -> dict[str, Any]:
-    """Synchronous single test case execution — runs inside a trio worker thread."""
     try:
         antithesis = os.environ.get("ANTITHESIS_OUTPUT_DIR")
         if antithesis:
@@ -406,7 +387,7 @@ def _single_test_case_sync(
 
         state = HegelState(connection, stream, is_final=True)
         with contextlib.suppress(StopTest):
-            state.test_function(data)
+            await state.async_test_function(data)
         data.freeze()
 
         result: dict[str, Any] = {
@@ -418,13 +399,11 @@ def _single_test_case_sync(
             "seed": str(seed) if not antithesis else None,
             "failure_blobs": [],
         }
-        trio.from_thread.run(
-            stream.send_request, {"event": "test_done", "results": result}
-        )
-        return result
+        await stream.send_request({"event": "test_done", "results": result})
+    except (ConnectionError, OSError):
+        pass
     except Exception:
         traceback.print_exc()
-        raise
 
 
 async def _run_test(
