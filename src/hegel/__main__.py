@@ -52,7 +52,13 @@ class _AsyncFileSendStream(trio.abc.SendStream):
     default="normal",
     help="Verbosity level. Corresponds to hypothesis.Verbosity.",
 )
-def main(verbosity):
+@click.option(
+    "--stdio",
+    is_flag=True,
+    hidden=True,
+    help="No-op, stdio is now the default.",
+)
+def main(verbosity, stdio):
     """Run the Hegel test server using stdin/stdout for protocol communication."""
     trio.run(run_server_stdio, Verbosity(verbosity))
 

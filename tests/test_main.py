@@ -36,6 +36,21 @@ def test_cli_calls_run_server_stdio(monkeypatch):
     assert len(called) == 1
 
 
+def test_cli_accepts_stdio_flag(monkeypatch):
+    called = []
+
+    async def fake_run_server_stdio(verbosity):
+        called.append(verbosity)
+
+    monkeypatch.setattr(
+        "hegel.__main__.run_server_stdio",
+        fake_run_server_stdio,
+    )
+    result = CliRunner().invoke(main, ["--stdio"])
+    assert result.exit_code == 0
+    assert len(called) == 1
+
+
 # --- StdioTransport tests ---
 
 
