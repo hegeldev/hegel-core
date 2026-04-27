@@ -1,5 +1,6 @@
 import hashlib
 import json
+from fractions import Fraction
 from typing import Any
 
 from cbor2 import CBORTag
@@ -23,6 +24,10 @@ class BooleansStrategy(SearchStrategy[bool]):
 
 # used to allow encoding of surrogate code points. See https://github.com/hegeldev/hegel-core/pull/72
 HEGEL_STRING_TAG = 91
+# https://peteroupc.github.io/CBOR/rational.html
+HEGEL_FRACTION_TAG = 30
+# https://www.iana.org/assignments/cbor-tags/template/43000
+HEGEL_COMPLEX_TAG = 43000
 
 
 def _encode_value(value: object) -> object:
@@ -39,6 +44,10 @@ def _encode_value(value: object) -> object:
     # nocover because we don't actually generate dicts yet
     if isinstance(value, dict):  # pragma: no cover
         return {_encode_value(k): _encode_value(v) for k, v in value.items()}
+    if isinstance(value, Fraction):
+        return CBORTag(HEGEL_FRACTION_TAG, [value.numerator, value.denominator])
+    if isinstance(value, complex):
+        return CBORTag(HEGEL_COMPLEX_TAG, [value.real, value.imag])
     return value
 
 
@@ -69,6 +78,21 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
             width=schema.get("width", 64),
             exclude_min=schema.get("exclude_min", False),
             exclude_max=schema.get("exclude_max", False),
+        )
+    if schema_type == "fraction":
+        return st.fractions(
+            min_value=schema.get("min_value"),
+            max_value=schema.get("max_value"),
+            max_denominator=schema.get("max_denominator"),
+        )
+    if schema_type == "complex":
+        return st.complex_numbers(
+            min_magnitude=schema.get("min_magnitude", 0),
+            max_magnitude=schema.get("max_magnitude"),
+            allow_infinity=schema.get("allow_infinity"),
+            allow_nan=schema.get("allow_nan"),
+            allow_subnormal=schema.get("allow_subnormal", True),
+            width=schema.get("width", 128),
         )
     if schema_type == "string":
         characters_schema = {
