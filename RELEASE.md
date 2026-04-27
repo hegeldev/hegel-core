@@ -1,3 +1,3 @@
 RELEASE_TYPE: patch
 
-Add rational and complex number schema types.
+Add fraction and complex number schema types.
