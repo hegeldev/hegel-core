@@ -1,9 +1,7 @@
 import contextlib
 import importlib.metadata
 import os
-import socket
 import sys
-from pathlib import Path
 
 import click
 from hypothesis import Verbosity
@@ -59,12 +57,12 @@ class StdioTransport:
     version=importlib.metadata.version("hegel-core"),
     message="hegel (version %(version)s)",
 )
-@click.argument("socket_path", required=False, default=None)
 @click.option(
     "--stdio",
+    "stdio",
     is_flag=True,
     default=False,
-    help="Use stdin/stdout for protocol communication instead of a Unix socket.",
+    help="Accepted for backward compatibility. The server always uses stdin/stdout.",
 )
 @click.option(
     "--verbosity",
@@ -72,57 +70,10 @@ class StdioTransport:
     default="normal",
     help="Verbosity level. Corresponds to hypothesis.Verbosity.",
 )
-def main(socket_path, stdio, verbosity):
-    """Run the Hegel test server, binding to socket_path."""
-    verbosity = Verbosity(verbosity)
-
-    if stdio:
-        if socket_path is not None:
-            raise click.UsageError("Cannot specify a socket path with --stdio.")
-        run_server_stdio(verbosity=verbosity)
-    else:
-        if socket_path is None:
-            raise click.UsageError("Socket path is required when not using --stdio.")
-        socket_path = Path(socket_path)
-
-        # Clean up any existing socket before starting
-        with contextlib.suppress(FileNotFoundError):
-            socket_path.unlink()
-
-        run_server(socket_path, verbosity=verbosity)
-
-
-def run_server(socket_path: Path, *, verbosity: Verbosity = Verbosity.normal) -> None:
-    if verbosity >= Verbosity.debug:
-        os.environ["HEGEL_PROTOCOL_DEBUG"] = "1"
-
-    set_hypothesis_home_dir(".hegel")
-
-    server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server_sock.bind(str(socket_path))
-    server_sock.listen(1)
-
-    if verbosity >= Verbosity.verbose:
-        print(f"Listening on {socket_path}", file=sys.stderr)
-
-    try:
-        client_sock, _ = server_sock.accept()
-
-        if verbosity >= Verbosity.verbose:
-            print("Client connected", file=sys.stderr)
-
-        connection = Connection(client_sock, name="Server")
-        test_mode = os.environ.get("HEGEL_PROTOCOL_TEST_MODE")
-        if test_mode:
-            run_test_server(connection, test_mode)
-        else:
-            run_server_on_connection(connection)
-
-        if verbosity >= Verbosity.verbose:
-            print("Client disconnected", file=sys.stderr)
-
-    finally:
-        server_sock.close()
+def main(stdio, verbosity):
+    """Run the Hegel test server, communicating over stdin/stdout."""
+    del stdio  # accepted for backward compatibility; stdio is the only mode
+    run_server_stdio(verbosity=Verbosity(verbosity))
 
 
 def run_server_stdio(*, verbosity: Verbosity = Verbosity.normal) -> None:
