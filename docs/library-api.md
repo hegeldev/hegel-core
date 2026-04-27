@@ -278,7 +278,7 @@ to work with non-JSON-serializable values and works uniformly across all librari
 
 ### `sampled_from`
 
-Sample uniformly from a fixed list of values.
+Sample from a fixed list of values.
 
 **Parameters:**
 - `values`: A non-empty list of values.

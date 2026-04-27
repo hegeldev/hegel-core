@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.9 - 2026-04-27
+
+This release adds a `command_prefix` argument to `run_conformance_tests` to control how conformance tests are run.
+
 ## 0.4.8 - 2026-04-27
 
 This patch removes the unused Unix socket transport from the `hegel` server. The server now always communicates with its client over stdin/stdout, matching how all current libraries spawn it.

@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unicodedata
 from abc import ABC, abstractmethod
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from encodings.aliases import aliases
 from pathlib import Path
 from typing import Any, ClassVar
@@ -179,8 +179,15 @@ class ConformanceTest(ABC):
         """Return additional environment variables for the library binary."""
         return {}
 
-    def run(self, params: dict[str, Any]) -> None:
+    def run(
+        self,
+        params: dict[str, Any],
+        *,
+        command_prefix: Sequence[str] | None = None,
+    ) -> None:
         """Run the library binary and validate its output."""
+        if command_prefix is None:
+            command_prefix = [sys.executable] if self.binary.suffix == ".py" else []
         # Use delete=False because on Windows, NamedTemporaryFile holds an
         # exclusive lock that prevents the subprocess from opening the file.
         f = tempfile.NamedTemporaryFile(
@@ -202,7 +209,7 @@ class ConformanceTest(ABC):
             input_json = json.dumps(params)
 
             result = subprocess.run(
-                [sys.executable, str(self.binary), input_json],
+                [*command_prefix, str(self.binary), input_json],
                 env={
                     **os.environ,
                     "CONFORMANCE_METRICS_FILE": str(metrics_file),
@@ -893,6 +900,7 @@ def run_conformance_tests(
     *,
     settings: Settings | None = None,
     skip_tests: Collection[type[ConformanceTest]] = frozenset(),
+    command_prefix: Sequence[str] | None = None,
 ) -> None:
     names = {type(t).__name__ for t in tests} | {
         TestClass.__name__ for TestClass in skip_tests
@@ -916,7 +924,7 @@ def run_conformance_tests(
                 def run_test(params: dict[str, Any]) -> None:
                     if mode is not None:
                         params["mode"] = mode
-                    test.run(params)
+                    test.run(params, command_prefix=command_prefix)
 
                 run_test()
 
