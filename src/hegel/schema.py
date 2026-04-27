@@ -8,6 +8,7 @@ from hypothesis.internal.cache import LRUCache
 from hypothesis.internal.conjecture.data import ConjectureData
 from hypothesis.provisional import domains, urls
 from hypothesis.strategies import SearchStrategy
+from fractions import Fraction
 
 FROM_SCHEMA_CACHE: LRUCache = LRUCache(1024)
 
@@ -39,6 +40,10 @@ def _encode_value(value: object) -> object:
     # nocover because we don't actually generate dicts yet
     if isinstance(value, dict):  # pragma: no cover
         return {_encode_value(k): _encode_value(v) for k, v in value.items()}
+    if isinstance(value, Fraction):
+        return {"numerator": value.numerator, "denominator": value.denominator}
+    if isinstance(value, complex):
+        return {"re": value.real, "im": value.imag}
     return value
 
 
@@ -69,6 +74,21 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
             width=schema.get("width", 64),
             exclude_min=schema.get("exclude_min", False),
             exclude_max=schema.get("exclude_max", False),
+        )
+    if schema_type == "rational":
+        return st.fractions(
+            min_value=schema.get("min_value"),
+            max_value=schema.get("max_value"),
+            max_denominator=schema.get("max_denominator"),
+        )
+    if schema_type == "complex":
+        return st.complex_numbers(
+            min_magnitude=schema.get("min_magnitude"),
+            max_magnitude=schema.get("max_magnitude"),
+            allow_infinity=schema.get("allow_infinity", False),
+            allow_nan=schema.get("allow_nan", False),
+            allow_subnormal=True,
+            width=128,
         )
     if schema_type == "string":
         characters_schema = {
