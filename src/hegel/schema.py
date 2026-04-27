@@ -24,10 +24,6 @@ class BooleansStrategy(SearchStrategy[bool]):
 
 # used to allow encoding of surrogate code points. See https://github.com/hegeldev/hegel-core/pull/72
 HEGEL_STRING_TAG = 91
-# https://peteroupc.github.io/CBOR/rational.html
-HEGEL_FRACTION_TAG = 30
-# https://www.iana.org/assignments/cbor-tags/template/43000
-HEGEL_COMPLEX_TAG = 43000
 
 
 def _encode_value(value: object) -> object:
@@ -45,9 +41,9 @@ def _encode_value(value: object) -> object:
     if isinstance(value, dict):  # pragma: no cover
         return {_encode_value(k): _encode_value(v) for k, v in value.items()}
     if isinstance(value, Fraction):
-        return CBORTag(HEGEL_FRACTION_TAG, [value.numerator, value.denominator])
+        return (value.numerator, value.denominator)
     if isinstance(value, complex):
-        return CBORTag(HEGEL_COMPLEX_TAG, [value.real, value.imag])
+        return (value.real, value.imag)
     return value
 
 

@@ -4,7 +4,7 @@ from fractions import Fraction
 
 import cbor2
 import pytest
-from cbor2 import CBORTag, _decoder as cbor2_python
+from cbor2 import _decoder as cbor2_python
 from hypothesis import assume, given, settings as Settings, strategies as st
 from hypothesis._settings import local_settings
 from hypothesis.control import _current_build_context
@@ -12,8 +12,6 @@ from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 
 from hegel.conformance import _character_params, text_params_strategy
 from hegel.schema import (
-    HEGEL_COMPLEX_TAG,
-    HEGEL_FRACTION_TAG,
     HEGEL_STRING_TAG,
     _encode_value,
     from_schema,
@@ -228,18 +226,12 @@ def test_complex():
     )
 
 
-def test_encode_complex():
-    result = _encode_value(complex(1, 2))
-    assert isinstance(result, CBORTag)
-    assert result.tag == HEGEL_COMPLEX_TAG
-    assert result.value == [1.0, 2.0]
-
-
 def test_encode_fraction():
-    result = _encode_value(Fraction(3, 4))
-    assert isinstance(result, CBORTag)
-    assert result.tag == HEGEL_FRACTION_TAG
-    assert result.value == [3, 4]
+    assert _encode_value(Fraction(3, 4)) == (3, 4)
+
+
+def test_encode_complex():
+    assert _encode_value(complex(1, 2)) == (1.0, 2.0)
 
 
 def test_float():
@@ -543,7 +535,7 @@ def test_from_schema(data):
         # Unsigned bignum, negative bignum, and custom encoding for utf8 + surrogates
         # respectively
         # https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-        if tag.tag in {2, 3, HEGEL_STRING_TAG, HEGEL_FRACTION_TAG, HEGEL_COMPLEX_TAG}:
+        if tag.tag in {2, 3, HEGEL_STRING_TAG}:
             return
         raise AssertionError(f"Saw CBOR tag {tag}")
 
