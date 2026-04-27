@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8 - 2026-04-27
+
+This patch removes the unused Unix socket transport from the `hegel` server. The server now always communicates with its client over stdin/stdout, matching how all current libraries spawn it.
+
 ## 0.4.7 - 2026-04-22
 
 This release adds a `single_test_case` top-level protocol command. When sent

@@ -5,18 +5,19 @@ covers the public API, protocol, design guidance, and implementation checklist.
 
 ## Overview
 
-A Hegel library enables property-based testing from any language by communicating
-with the Hegel server via Unix socket. The library provides:
+A Hegel library enables property-based testing from any language by spawning
+the `hegel` CLI as a subprocess and communicating with it over its
+stdin/stdout. The library provides:
 
 1. **Generator types** that produce random values according to constraints
 2. **Combinators** for composing generators into complex structures
-3. **Socket communication** to request values from Hypothesis's generation engine
+3. **Subprocess communication** to request values from Hypothesis's generation engine
 4. **Schema composition** for efficient single-request generation
 
 ### Core Principles
 
 - **Schema composition preferred**: When possible, compose schemas and make a
-  single socket request for the entire structure.
+  single protocol request for the entire structure.
 - **Compositional fallback**: When schemas are unavailable (after `map`/`filter`
   on non-basic generators, or `flat_map`), generate structurally with multiple
   requests.
@@ -591,16 +592,16 @@ will try to maximize the target value, which can help find edge cases.
 ## Protocol
 
 Client libraries communicate with the Hegel server via a binary protocol over
-Unix domain sockets.
+the server subprocess's stdin/stdout.
 
 ### Connection Lifecycle
 
-1. Client creates a socket path.
-2. Client spawns hegel server with that socket path.
-3. hegel server binds to the socket and listens.
-4. Client connects to the hegel server socket.
-5. A single persistent connection is maintained per program run.
-6. Multiple tests run over the same connection.
+1. Client spawns the `hegel` server as a subprocess, capturing its stdin and
+   stdout. (Stderr is left available for diagnostic output.)
+2. Client writes packets to the server's stdin and reads packets from its
+   stdout.
+3. A single persistent connection is maintained per program run.
+4. Multiple tests run over the same connection.
 
 ### Packet Format
 
@@ -858,8 +859,8 @@ labeled group.
 ### Reading packets from the Connection
 
 The Hegel protocol uses a **demand-driven reader** reader. When a stream needs
-a message, it drives the connection's reader to read from the socket until the
-needed message arrives (or a timeout is reached).
+a message, it drives the connection's reader to read from the transport until
+the needed message arrives (or a timeout is reached).
 
 **How it works:**
 
@@ -869,7 +870,7 @@ needed message arrives (or a timeout is reached).
    stream is closed, or a timeout expires.
 2. `run_reader` acquires a reader lock (non-blocking — if another thread holds
    it, the caller polls until the lock is free or `until` is true).
-3. While the lock is held, it reads packets from the socket (with short
+3. While the lock is held, it reads packets from the transport (with short
    timeouts to allow checking the `until` condition) and dispatches them to
    the appropriate stream's inbox.
 4. When `until()` returns true, the reader releases the lock and returns.
@@ -878,17 +879,17 @@ needed message arrives (or a timeout is reached).
 
 - **No background thread**: There is no dedicated reader thread. Reading
   happens on the calling thread when a stream needs data.
-- **Reader lock**: Only one thread reads from the socket at a time. The lock
-  is acquired non-blocking — other threads poll until it's available.
-- **Short read timeouts**: `read_packet` uses a short socket timeout (e.g.
+- **Reader lock**: Only one thread reads from the transport at a time. The
+  lock is acquired non-blocking — other threads poll until it's available.
+- **Short read timeouts**: `read_packet` uses a short read timeout (e.g.
   100ms) so the reader can periodically check the `until` condition.
-- **Close is simple**: Set `running = false`, shutdown the socket, close
+- **Close is simple**: Set `running = false`, close the transport, close
   streams. No thread join needed.
 
 **Thread safety for sends:**
 
 - A separate writer lock protects `send_packet` so multiple threads can
-  send concurrently without corrupting the socket stream.
+  send concurrently without corrupting the byte stream.
 - Stream registration also uses the writer lock.
 
 **Thread-local state:**

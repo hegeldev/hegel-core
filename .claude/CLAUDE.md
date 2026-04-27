@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hegel is a universal property-based testing protocol. A Python server (powered by Hypothesis) communicates with language-specific client libraries via Unix sockets. This repository contains the Python core server.
+Hegel is a universal property-based testing protocol. A Python server (powered by Hypothesis) communicates with language-specific client libraries over the server's stdin/stdout. This repository contains the Python core server.
 
 ## Build & Test Commands
 
@@ -29,14 +29,13 @@ Coverage runs twice in CI: once normally and once with `ANTITHESIS_OUTPUT_DIR` s
 
 ### Client-Server Communication
 
-1. **Client** creates a Unix socket path and spawns the `hegel` CLI with that path
-2. **The server** binds to the socket and listens for the client to connect
-3. A single persistent connection supports multiple test executions
-4. **Hypothesis ConjectureRunner** drives test execution on the server side, including shrinking
+1. **Client** spawns the `hegel` CLI as a subprocess and communicates over its stdin/stdout
+2. A single persistent connection supports multiple test executions
+3. **Hypothesis ConjectureRunner** drives test execution on the server side, including shrinking
 
 ### Protocol
 
-Binary protocol over Unix socket with CBOR-encoded payloads:
+Binary protocol over stdin/stdout with CBOR-encoded payloads:
 - 20-byte header + variable payload + terminator byte: magic `0x4845474C` (HEGL), CRC32, stream ID, message ID, payload length
 - Stream 0 is the control stream; odd-numbered streams are client-created, even-numbered are server-created
 - Reply bit (`1 << 31`) in message ID distinguishes requests from replies
@@ -44,7 +43,7 @@ Binary protocol over Unix socket with CBOR-encoded payloads:
 
 ### Module Overview
 
-- `__main__.py` - CLI entry point (`hegel` command via click), binds Unix socket and starts server
+- `__main__.py` - CLI entry point (`hegel` command via click). Speaks the protocol over stdin/stdout.
 - `server.py` - Drives test execution via Hypothesis `ConjectureRunner` with a `ThreadPoolExecutor`. Contains `HegelState` (per-test-run state) and `_run_test` (orchestrates a full test including shrinking and final replay)
 - `protocol/` - Binary protocol package:
   - `packet.py` - Wire format: `Packet` dataclass, `read_packet`/`write_packet` for serialization with CRC32 checksums
@@ -67,7 +66,7 @@ Binary protocol over Unix socket with CBOR-encoded payloads:
 
 ### Generator Modes
 
-1. **Schema Composition** (preferred): Compose JSON schemas, single socket request. Generators that have schemas are called "basic generators."
+1. **Schema Composition** (preferred): Compose JSON schemas, single protocol request. Generators that have schemas are called "basic generators."
 2. **Compositional Fallback**: Multiple requests wrapped in spans when schemas unavailable (after `map`/`filter` on non-basic generators, or `flatmap`)
 
 Key insight: `map()` on a basic generator preserves the schema by composing the transform function, rather than losing it. This is the central optimization across all libraries.
@@ -113,4 +112,4 @@ The first line must be `RELEASE_TYPE: major`, `RELEASE_TYPE: minor`, or `RELEASE
 
 ### Writing Changelog Entries
 
-When writing a `RELEASE.md`, read `.claude/changelog-guidance.md` for detailed style guidance.
+When writing a `RELEASE.md`, invoke the `changelog` skill (see `.claude/skills/changelog/SKILL.md`) for detailed style guidance.

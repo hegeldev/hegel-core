@@ -54,9 +54,9 @@ class Connection:
     A connection can be used simultaneously by multiple tests.
 
     At the lowest level, the protocol is bytes moving across the transport layer. The
-    transport layer is currently unix sockets, though this may change to support windows.
-    Bytes sent over the socket always consist of logical packets (see the Packet class).
-    Packets on the protocol have a stream_id, which logically organizes packets. See the
+    transport layer is the server subprocess's stdin/stdout. Bytes sent over the
+    transport always consist of logical packets (see the Packet class). Packets on
+    the protocol have a stream_id, which logically organizes packets. See the
     Stream class for details.
 
     Protocol

@@ -43,7 +43,7 @@ def _encode_value(value: object) -> object:
     if isinstance(value, Fraction):
         return {"numerator": value.numerator, "denominator": value.denominator}
     if isinstance(value, complex):
-        return {"re": value.real, "im": value.imag}
+        return {"real": value.real, "imaginary": value.imag}
     return value
 
 
