@@ -11,6 +11,7 @@ from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 
 from hegel.conformance import _character_params, text_params_strategy
 from hegel.schema import HEGEL_STRING_TAG, _encode_value, from_schema
+from fractions import Fraction
 
 
 def assert_all_examples(strategy, predicate, settings=None):
@@ -186,6 +187,19 @@ def test_integer():
     assert_all_examples(
         from_schema({"type": "integer", "min_value": 0, "max_value": 10}),
         lambda x: isinstance(x, int) and 0 <= x <= 10,
+    )
+
+
+def test_rationals():
+    assert_all_examples(
+        from_schema({"type": "rational", "min_value": 0, "max_value": 1}),
+        lambda x: isinstance(x, Fraction) and 0 <= x <= 1,
+    )
+
+def test_complex():
+    assert_all_examples(
+        from_schema({"type": "complex", "min_magnitude": 0, "max_magnitude": 1}),
+        lambda x: isinstance(x, complex) and abs(x) <= 1,
     )
 
 
