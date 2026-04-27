@@ -87,11 +87,11 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
         )
     if schema_type == "complex":
         return st.complex_numbers(
-            min_magnitude=schema.get("min_magnitude", 0.0),
+            min_magnitude=schema.get("min_magnitude", 0),
             max_magnitude=schema.get("max_magnitude"),
-            allow_infinity=schema.get("allow_infinity", False),
-            allow_nan=schema.get("allow_nan", False),
-            allow_subnormal=True,
+            allow_infinity=schema.get("allow_infinity"),
+            allow_nan=schema.get("allow_nan"),
+            allow_subnormal=schema.get("allow_subnormal", True),
             width=schema.get("width", 128),
         )
     if schema_type == "string":
