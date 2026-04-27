@@ -11,7 +11,13 @@ from hypothesis.control import _current_build_context
 from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 
 from hegel.conformance import _character_params, text_params_strategy
-from hegel.schema import HEGEL_COMPLEX_TAG, HEGEL_STRING_TAG,HEGEL_RATIONAL_TAG, _encode_value, from_schema
+from hegel.schema import (
+    HEGEL_COMPLEX_TAG,
+    HEGEL_RATIONAL_TAG,
+    HEGEL_STRING_TAG,
+    _encode_value,
+    from_schema,
+)
 
 
 def assert_all_examples(strategy, predicate, settings=None):
