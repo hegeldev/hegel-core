@@ -13,7 +13,7 @@ from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 from hegel.conformance import _character_params, text_params_strategy
 from hegel.schema import (
     HEGEL_COMPLEX_TAG,
-    HEGEL_RATIONAL_TAG,
+    HEGEL_FRACTION_TAG,
     HEGEL_STRING_TAG,
     _encode_value,
     from_schema,
@@ -75,7 +75,7 @@ def primitive_hashable_schemas():
         )
         | st.builds(
             lambda min_val, max_val: {
-                "type": "rational",
+                "type": "fraction",
                 "min_value": min_val,
                 "max_value": max_val,
             },
@@ -214,9 +214,9 @@ def test_integer():
     )
 
 
-def test_rationals():
+def test_fractions():
     assert_all_examples(
-        from_schema({"type": "rational", "min_value": 0, "max_value": 1}),
+        from_schema({"type": "fraction", "min_value": 0, "max_value": 1}),
         lambda x: isinstance(x, Fraction) and 0 <= x <= 1,
     )
 
@@ -529,7 +529,7 @@ def test_from_schema(data):
         # Unsigned bignum, negative bignum, and custom encoding for utf8 + surrogates
         # respectively
         # https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-        if tag.tag in {2, 3, HEGEL_STRING_TAG, HEGEL_RATIONAL_TAG, HEGEL_COMPLEX_TAG}:
+        if tag.tag in {2, 3, HEGEL_STRING_TAG, HEGEL_FRACTION_TAG, HEGEL_COMPLEX_TAG}:
             return
         raise AssertionError(f"Saw CBOR tag {tag}")
 
