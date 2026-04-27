@@ -58,21 +58,13 @@ class StdioTransport:
     message="hegel (version %(version)s)",
 )
 @click.option(
-    "--stdio",
-    "stdio",
-    is_flag=True,
-    default=False,
-    help="Accepted for backward compatibility. The server always uses stdin/stdout.",
-)
-@click.option(
     "--verbosity",
     type=click.Choice(["quiet", "normal", "verbose", "debug"]),
     default="normal",
     help="Verbosity level. Corresponds to hypothesis.Verbosity.",
 )
-def main(stdio, verbosity):
+def main(verbosity):
     """Run the Hegel test server, communicating over stdin/stdout."""
-    del stdio  # accepted for backward compatibility; stdio is the only mode
     run_server_stdio(verbosity=Verbosity(verbosity))
 
 

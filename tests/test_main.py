@@ -93,20 +93,7 @@ def test_stdio_transport_recv_none():
 # --- CLI tests ---
 
 
-def test_cli_stdio_flag_is_accepted(monkeypatch):
-    """--stdio is kept for compatibility but is a no-op (stdio is the only mode)."""
-    called = []
-    monkeypatch.setattr(
-        "hegel.__main__.run_server_stdio",
-        lambda **kwargs: called.append(kwargs),
-    )
-    result = CliRunner().invoke(main, ["--stdio"])
-    assert result.exit_code == 0
-    assert len(called) == 1
-
-
-def test_cli_no_stdio_flag_still_uses_stdio(monkeypatch):
-    """Without --stdio the server still runs in stdio mode."""
+def test_cli_invokes_run_server_stdio(monkeypatch):
     called = []
     monkeypatch.setattr(
         "hegel.__main__.run_server_stdio",

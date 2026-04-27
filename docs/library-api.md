@@ -603,10 +603,6 @@ the server subprocess's stdin/stdout.
 3. A single persistent connection is maintained per program run.
 4. Multiple tests run over the same connection.
 
-The `hegel` CLI accepts a `--stdio` flag for backward compatibility with
-older callers, but it is a no-op: the server always communicates over
-stdin/stdout.
-
 ### Packet Format
 
 Each packet has a 20-byte header:

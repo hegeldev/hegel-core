@@ -43,7 +43,7 @@ Binary protocol over stdin/stdout with CBOR-encoded payloads:
 
 ### Module Overview
 
-- `__main__.py` - CLI entry point (`hegel` command via click). Speaks the protocol over stdin/stdout. The `--stdio` flag is accepted for backward compatibility but is a no-op.
+- `__main__.py` - CLI entry point (`hegel` command via click). Speaks the protocol over stdin/stdout.
 - `server.py` - Drives test execution via Hypothesis `ConjectureRunner` with a `ThreadPoolExecutor`. Contains `HegelState` (per-test-run state) and `_run_test` (orchestrates a full test including shrinking and final replay)
 - `protocol/` - Binary protocol package:
   - `packet.py` - Wire format: `Packet` dataclass, `read_packet`/`write_packet` for serialization with CRC32 checksums
