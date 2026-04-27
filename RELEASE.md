@@ -1,6 +1,6 @@
-RELEASE_TYPE: minor
+RELEASE_TYPE: patch
 
-This release removes the Unix socket transport from the `hegel` server. The
+This patch removes the Unix socket transport from the `hegel` server. The
 server now always communicates with clients over its stdin/stdout. The
 positional `socket_path` argument has been removed from the CLI; the `--stdio`
 flag is still accepted for backward compatibility with existing callers, but
