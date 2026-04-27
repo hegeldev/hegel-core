@@ -4,7 +4,7 @@ from fractions import Fraction
 
 import cbor2
 import pytest
-from cbor2 import _decoder as cbor2_python
+from cbor2 import CBORTag, _decoder as cbor2_python
 from hypothesis import assume, given, settings as Settings, strategies as st
 from hypothesis._settings import local_settings
 from hypothesis.control import _current_build_context
@@ -226,6 +226,20 @@ def test_complex():
         from_schema({"type": "complex", "min_magnitude": 0, "max_magnitude": 1}),
         lambda x: isinstance(x, complex) and abs(x) <= 1,
     )
+
+
+def test_encode_complex():
+    result = _encode_value(complex(1, 2))
+    assert isinstance(result, CBORTag)
+    assert result.tag == HEGEL_COMPLEX_TAG
+    assert result.value == [1.0, 2.0]
+
+
+def test_encode_fraction():
+    result = _encode_value(Fraction(3, 4))
+    assert isinstance(result, CBORTag)
+    assert result.tag == HEGEL_FRACTION_TAG
+    assert result.value == [3, 4]
 
 
 def test_float():
