@@ -593,16 +593,19 @@ class ListConformance(ConformanceTest):
         min_value: int | None = None,
         max_value: int | None = None,
         skip_server_metrics: bool = False,
+        skip_unique: bool = False,
     ) -> None:
         super().__init__(
             binary_path, test_cases, skip_server_metrics=skip_server_metrics
         )
         self.min_value = min_value
         self.max_value = max_value
+        self.skip_unique = skip_unique
 
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
         min_value = self.min_value
         max_value = self.max_value
+        skip_unique = self.skip_unique
 
         @st.composite
         def strategy(draw: st.DrawFn) -> dict[str, Any]:
@@ -617,7 +620,7 @@ class ListConformance(ConformanceTest):
             )
 
             integer_params = draw(_integer_params_strategy(min_value, max_value))
-            unique = draw(st.booleans())
+            unique = False if skip_unique else draw(st.booleans())
 
             if unique:
                 lo = integer_params["min_value"]
