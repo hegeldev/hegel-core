@@ -11,7 +11,7 @@ from hypothesis.control import _current_build_context
 from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 
 from hegel.conformance import _character_params, text_params_strategy
-from hegel.schema import HEGEL_STRING_TAG, _encode_value, from_schema
+from hegel.schema import HEGEL_COMPLEX_TAG, HEGEL_STRING_TAG,HEGEL_RATIONAL_TAG, _encode_value, from_schema
 
 
 def assert_all_examples(strategy, predicate, settings=None):
@@ -66,6 +66,24 @@ def primitive_hashable_schemas():
             # TODO this is a bad strategy, make it better
             min_val=st.integers(-1000, 0),
             max_val=st.integers(0, 1000),
+        )
+        | st.builds(
+            lambda min_val, max_val: {
+                "type": "rational",
+                "min_value": min_val,
+                "max_value": max_val,
+            },
+            min_val=st.integers(-1000, 0),
+            max_val=st.integers(0, 1000),
+        )
+        | st.builds(
+            lambda min_val, max_val: {
+                "type": "complex",
+                "min_magnitude": min_val,
+                "max_magnitude": max_val,
+            },
+            min_val=st.floats(0, 1000, allow_nan=False),
+            max_val=st.floats(1000, 2000, allow_nan=False),
         )
         | string_schemas()
         | st.just({"type": "email"})
@@ -505,7 +523,7 @@ def test_from_schema(data):
         # Unsigned bignum, negative bignum, and custom encoding for utf8 + surrogates
         # respectively
         # https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-        if tag.tag in {2, 3, HEGEL_STRING_TAG}:
+        if tag.tag in {2, 3, HEGEL_STRING_TAG, HEGEL_RATIONAL_TAG, HEGEL_COMPLEX_TAG}:
             return
         raise AssertionError(f"Saw CBOR tag {tag}")
 
