@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.10 - 2026-04-27
+
+Add fraction and complex number schema types.
+
 ## 0.4.9 - 2026-04-27
 
 This release adds a `command_prefix` argument to `run_conformance_tests` to control how conformance tests are run.
