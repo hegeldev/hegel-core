@@ -1,3 +1,8 @@
+---
+name: changelog
+description: "Changelog style guide for writing RELEASE.md files. Use when creating or reviewing RELEASE.md, writing changelog entries, or preparing a PR that needs release notes."
+---
+
 # Changelog Style Guide
 
 This guide describes the style for writing `RELEASE.md` files for hegel-core. The style is modeled on the [Hypothesis changelog](https://hypothesis.readthedocs.io/en/latest/changes.html).
@@ -80,7 +85,7 @@ Don't include code blocks for bug fixes or internal changes.
 ```
 RELEASE_TYPE: patch
 
-This patch fixes `generators::hashsets` generating duplicate elements in rare cases when the element generator had a very small output space.
+This patch fixes a rare deadlock in the protocol reader when a stream was closed concurrently with an in-flight request.
 ```
 
 **Good patch (internal):**

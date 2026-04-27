@@ -112,4 +112,4 @@ The first line must be `RELEASE_TYPE: major`, `RELEASE_TYPE: minor`, or `RELEASE
 
 ### Writing Changelog Entries
 
-When writing a `RELEASE.md`, read `.claude/changelog-guidance.md` for detailed style guidance.
+When writing a `RELEASE.md`, invoke the `changelog` skill (see `.claude/skills/changelog/SKILL.md`) for detailed style guidance.
