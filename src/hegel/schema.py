@@ -1,5 +1,6 @@
 import hashlib
 import json
+from fractions import Fraction
 from typing import Any
 
 from cbor2 import CBORTag
@@ -8,7 +9,6 @@ from hypothesis.internal.cache import LRUCache
 from hypothesis.internal.conjecture.data import ConjectureData
 from hypothesis.provisional import domains, urls
 from hypothesis.strategies import SearchStrategy
-from fractions import Fraction
 
 FROM_SCHEMA_CACHE: LRUCache = LRUCache(1024)
 
@@ -88,7 +88,7 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
             allow_infinity=schema.get("allow_infinity", False),
             allow_nan=schema.get("allow_nan", False),
             allow_subnormal=True,
-            width=128,
+            width=schema.get("width", 128),
         )
     if schema_type == "string":
         characters_schema = {

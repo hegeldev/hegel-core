@@ -1,5 +1,6 @@
 import io
 import re
+from fractions import Fraction
 
 import cbor2
 import pytest
@@ -11,7 +12,6 @@ from hypothesis.strategies._internal.regex import IncompatibleWithAlphabet
 
 from hegel.conformance import _character_params, text_params_strategy
 from hegel.schema import HEGEL_STRING_TAG, _encode_value, from_schema
-from fractions import Fraction
 
 
 def assert_all_examples(strategy, predicate, settings=None):
@@ -195,6 +195,7 @@ def test_rationals():
         from_schema({"type": "rational", "min_value": 0, "max_value": 1}),
         lambda x: isinstance(x, Fraction) and 0 <= x <= 1,
     )
+
 
 def test_complex():
     assert_all_examples(
