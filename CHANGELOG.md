@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.11 - 2026-04-28
+
+This release adds a `skip_unique` parameter to `ListConformance`.
+
 ## 0.4.10 - 2026-04-27
 
 Add fraction and complex number schema types.
