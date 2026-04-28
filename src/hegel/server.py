@@ -219,15 +219,6 @@ class HegelState:
                         return None
                     elif command == "mark_complete":
                         done = True
-                        server_metrics_file = os.environ.get(
-                            "CONFORMANCE_SERVER_METRICS_FILE"
-                        )
-                        if server_metrics_file is not None:
-                            with open(server_metrics_file, "a", encoding="utf-8") as mf:
-                                mf.write(
-                                    json.dumps({"generate_call_count": generate_count})
-                                    + "\n"
-                                )
                         status = Status[message["status"]]
                         origin = message.get("origin")
                         if status is Status.VALID:
@@ -300,7 +291,23 @@ class HegelState:
                     self.flaky_error = e
                     raise
 
-            test_case_stream.handle_requests(handle_client_request, until=lambda: done)
+            try:
+                test_case_stream.handle_requests(
+                    handle_client_request, until=lambda: done
+                )
+            finally:
+                server_metrics_file = os.environ.get("CONFORMANCE_SERVER_METRICS_FILE")
+                if server_metrics_file is not None:
+                    with open(server_metrics_file, "a", encoding="utf-8") as mf:
+                        mf.write(
+                            json.dumps(
+                                {
+                                    "generate_call_count": generate_count,
+                                    "status": int(data.status),
+                                }
+                            )
+                            + "\n"
+                        )
 
 
 def run_server_on_connection(connection: Connection) -> None:
