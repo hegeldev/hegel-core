@@ -22,6 +22,7 @@ from hypothesis import (
 )
 from hypothesis.errors import InvalidArgument
 from hypothesis.internal import charmap
+from hypothesis.internal.conjecture.data import Status
 
 
 def _can_encode(codec: str) -> bool:
@@ -230,7 +231,7 @@ class ConformanceTest(ABC):
                     f"stderr: {result.stderr}",
                 )
 
-            metrics_list = [
+            metrics = [
                 json.loads(line)
                 for line in metrics_file.read_text(encoding="utf-8").split("\n")
                 if line
@@ -238,14 +239,19 @@ class ConformanceTest(ABC):
 
             server_metrics_text = server_metrics_file.read_text(encoding="utf-8")
             if server_metrics_text:
-                server_metrics_list = [
+                server_metrics = [
                     json.loads(line) for line in server_metrics_text.split("\n") if line
                 ]
-                assert len(server_metrics_list) == len(metrics_list)
-                for client_m, server_m in zip(
-                    metrics_list, server_metrics_list, strict=True
-                ):
+                assert len(server_metrics) == len(metrics)
+                paired = []
+                for client_m, server_m in zip(metrics, server_metrics, strict=True):
+                    server_m["status"] = Status(server_m["status"])
+                    # skip these for now, we might do something with them in the future
+                    if server_m["status"] in (Status.INVALID, Status.OVERRUN):
+                        continue
                     client_m.update(server_m)
+                    paired.append(client_m)
+                metrics = paired
             elif not self.skip_server_metrics:
                 raise RuntimeError(
                     "Server metrics file is empty. The library binary should "
@@ -264,7 +270,7 @@ class ConformanceTest(ABC):
             server_metrics_file.unlink(missing_ok=True)
             run_metrics_file.unlink(missing_ok=True)
 
-        self.validate(metrics_list, params)
+        self.validate(metrics, params)
 
 
 class ErrorHandlingConformance(ConformanceTest):
