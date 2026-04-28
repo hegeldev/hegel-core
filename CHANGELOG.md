@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.13 - 2026-04-28
+
+This release tweaks how our conformance tests write metrics.
+
 ## 0.4.12 - 2026-04-28
 
 Removes CBOR tagging from fraction and complex numbers.
