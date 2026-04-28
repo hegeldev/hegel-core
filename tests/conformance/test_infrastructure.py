@@ -114,6 +114,16 @@ def test_text_conformance_test_no_surrogates(s):
 
 def test_text_conformance_test_surrogates():
     find_any(
-        _text_from_params(no_surrogates=False),
+        text_params_strategy(no_surrogates=False),
+        lambda p: (
+            "Cs" not in p.get("exclude_categories", [])
+            and "Cs" in p.get("categories", ["Cs"])
+            and "codec" not in p
+            and p.get("min_codepoint", 0) <= 0xD800
+            and p.get("max_codepoint", 0x10FFFF) >= 0xDFFF
+        ),
+    )
+    find_any(
+        st.text(st.characters(categories=["Cs"]), min_size=1),
         lambda s: any(unicodedata.category(c) == "Cs" for c in s),
     )
