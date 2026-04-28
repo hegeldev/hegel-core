@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.12 - 2026-04-28
+
+Removes CBOR tagging from fraction and complex numbers.
+
 ## 0.4.11 - 2026-04-28
 
 This release adds a `skip_unique` parameter to `ListConformance`.
