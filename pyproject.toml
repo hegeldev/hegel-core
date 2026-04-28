@@ -34,9 +34,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "cbor2>=5.8.0",
-    "click>=8.3.1",
-    "hypothesis>=6.148.5",
+    "cbor2>=5.8.0,<6.0.0",
+    "click>=8.3.1,<9.0.0",
+    "hypothesis>=6.148.5,<7.0.0",
 ]
 
 [dependency-groups]
