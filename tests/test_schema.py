@@ -331,11 +331,43 @@ def test_sampled_from():
 
 
 def test_one_of():
+    def check(v):
+        if not (isinstance(v, tuple) and len(v) == 2):
+            return False
+        index, value = v
+        if index == 0:
+            return isinstance(value, bool)
+        if index == 1:
+            return value is None
+        return False
+
     assert_all_examples(
         from_schema(
             {"type": "one_of", "generators": [{"type": "boolean"}, {"type": "null"}]}
         ),
-        lambda x: x is None or isinstance(x, bool),
+        check,
+    )
+
+
+def test_one_of_tuple_structure():
+    assert_all_examples(
+        from_schema(
+            {
+                "type": "one_of",
+                "generators": [
+                    {"type": "integer"},
+                    {"type": "boolean"},
+                    {"type": "null"},
+                ],
+            }
+        ),
+        lambda v: (
+            isinstance(v, tuple)
+            and len(v) == 2
+            # bool is a subclass of int in Python, but the index must be a plain int
+            and type(v[0]) is int
+            and 0 <= v[0] <= 2
+        ),
     )
 
 

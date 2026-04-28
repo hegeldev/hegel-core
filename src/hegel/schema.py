@@ -55,7 +55,12 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
     if schema_type == "sampled_from":
         return st.sampled_from(schema["values"])
     if schema_type == "one_of":
-        return st.one_of([_from_schema(s) for s in schema["generators"]])
+        return st.one_of(
+            [
+                st.tuples(st.just(i), _from_schema(s))
+                for i, s in enumerate(schema["generators"])
+            ]
+        )
     if schema_type == "null":
         return st.none()
     if schema_type == "boolean":

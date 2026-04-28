@@ -100,7 +100,7 @@ A generator is basic (i.e. has a schema and optional transform) in these cases:
 | `lists(elements)` | If `elements` is basic | `{"type": "list", "elements": ..., ...}` | Applies element transform to each item (if any) |
 | `tuples(e1, e2, ...)` | If ALL elements are basic | `{"type": "tuple", "elements": [...]}` | Applies each element's transform (if any) |
 | `dicts(keys, values)` | If both are basic | `{"type": "dict", "keys": ..., "values": ..., ...}` | Applies key/value transforms, converts pairs to dict |
-| `one_of(g1, g2, ...)` | If ALL branches are basic | `{"one_of": [...]}` | See below |
+| `one_of(g1, g2, ...)` | If ALL branches are basic | `{"type": "one_of", "generators": [...]}` | Dispatches per-branch transform on the response index. See below |
 | `optional(element)` | If `element` is basic | Via `one_of(just(None), element)` | Via one_of |
 | Format generators (emails, urls, etc.) | Always | `{"type": "email"}` etc. | None |
 | `from_regex(pattern)` | Always | `{"type": "regex", ...}` | None |
@@ -328,7 +328,7 @@ These generators produce formatted strings.
 | `emails()` | `{"type": "email"}` |
 | `urls()` | `{"type": "url"}` |
 | `domains()` | `{"type": "domain", "max_length": <int>}` |
-| `ip_addresses()` | `{"type": "ipv4"}`, `{"type": "ipv6"}`, or `{"one_of": [{"type": "ipv4"}, {"type": "ipv6"}]}` |
+| `ip_addresses()` | `{"type": "ipv4"}`, `{"type": "ipv6"}`, or `{"type": "one_of", "generators": [{"type": "ipv4"}, {"type": "ipv6"}]}` |
 | `dates()` | `{"type": "date"}` |
 | `times()` | `{"type": "time"}` |
 | `datetimes()` | `{"type": "datetime"}` |
@@ -478,42 +478,41 @@ Choose from one of several generators.
 **Parameters:**
 - `generators`: Two or more generators.
 
-**When ALL generators are basic with no transforms (identity):**
-
-Returns a basic generator with a simple one_of schema.
-
-Schema:
+**Schema:**
 ```json
-{"one_of": [<schema1>, <schema2>, ...]}
+{"type": "one_of", "generators": [<schema1>, <schema2>, ...]}
 ```
 
-No transform needed — the server directly generates a value from one of the
-schemas.
+The schema shape is the same regardless of whether any branches have
+transforms.
 
-**When ALL generators are basic but some have transforms:**
-
-Returns a basic generator using **tagged tuples**. Each branch becomes a
-tagged tuple `[tag, value]` where `tag` is a constant integer identifying
-the branch.
-
-Schema:
-```json
-{
-  "one_of": [
-    {"type": "tuple", "elements": [{"constant": 0}, <schema1>]},
-    {"type": "tuple", "elements": [{"constant": 1}, <schema2>]},
-    ...
-  ]
-}
+**Wire response:**
+```
+[index, value]
 ```
 
-Transform: Reads the tag to determine which branch was selected, then applies
-that branch's transform to the value.
+A 2-element list where `index` is the 0-based branch index and `value`
+is the value drawn from `generators[index]`. The index is always present
+on the wire — even when no branch has a transform.
+
+**Library-side handling:**
+
+- Build a per-branch transform table aligned to `generators`. For branches
+  without a transform, store identity.
+- On receive, unpack `[index, value]`, apply `transforms[index]` to `value`,
+  and return that.
+- The index is an internal protocol detail — never surface it to user code.
+
+**When ALL generators are basic:**
+
+Returns a basic generator using the schema above. One protocol request per
+draw; the library dispatches the per-branch transform using the index.
 
 **When any generator is not basic:**
 
 Falls back to compositional generation: generates an index, then delegates
-to the selected generator. Wrapped in a span with label `ONE_OF`.
+to the selected generator. Wrapped in a span with label `ONE_OF`. This path
+is unchanged.
 
 ### `optional` / `optional_`
 

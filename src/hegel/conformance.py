@@ -700,11 +700,16 @@ class OneOfConformance(ConformanceTest):
 
     Uses non-overlapping integer ranges as branches so validation can
     determine which branch produced each value. Three modes exercise
-    the three oneOf implementation paths:
+    the two oneOf implementation paths:
 
-    - basic: all branches are basic generators (single combined schema)
-    - map_negate: branches mapped through negation (single combined schema)
-    - filter_even: branches filtered to even values only (span protocol)
+    - basic: all branches are basic generators; uses the single combined
+      schema path
+    - map_negate: branches mapped through negation; still all-basic, so
+      it also uses the single combined schema path (the per-branch
+      transform is dispatched on the branch index returned by the
+      server)
+    - filter_even: branches filtered to even values only, which is
+      non-basic, so it falls back to the compositional span path
 
     Validates both correctness (values in expected ranges) and that the
     correct protocol path was used (single schema vs. multiple requests).
