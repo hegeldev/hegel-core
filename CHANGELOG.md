@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.14 - 2026-04-28
+
+Pin our dependencies to below their next major version.
+
 ## 0.4.13 - 2026-04-28
 
 This release tweaks how our conformance tests write metrics.
