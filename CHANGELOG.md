@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-04-29
+
+This release changes the `one_of` protocol request to return a tuple of `[index, value]`, rather than just `value`.
+
 ## 0.4.14 - 2026-04-28
 
 Pin our dependencies to below their next major version.
