@@ -8,7 +8,6 @@ __pycache__/
 .direnv/
 result
 *.egg-info
-.claude/settings.local.json
 build/
 external
 .devcontainer
@@ -20,17 +19,16 @@ htmlcov/
 error.log
 dist/
 
-.claude/reliability-config.yml
-.claude/reliability-config.yaml
-.claude/*.local.md
-.claude/*.local.json
-.claude/*.local
-CLAUDE.local.md
-.claude/local/
+# whitelist .claude files, rather than blacklist. Some local claude files
+# (skills, agents) have to live in .claude - as opposed to eg CLAUDE.local.md,
+# which we gitignore at the top level.
+.claude/*
+!.claude/CLAUDE.md
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/changelog/
+!.claude/skills/writing-conformance-tests/
 
-# claude-reliability managed
-.claude/bin/
-.claude/*.local.md
-.claude/*.local.json
-.claude/*.local
+CLAUDE.local.md
+
 .claude-reliability/
