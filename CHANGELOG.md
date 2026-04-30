@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-04-30
+
+This release makes the following breaking protocol changes:
+- Removed `{"type": "sampled_from"}`. Instead of serializing the values to sample from, ask for an integer index and index into the collection of values on the client side.
+- Removed `{"type": "null"}`. Use `{"type": "constant", "value": null}` instead.
+- Replaced `{"type": "ipv4"}` and `{"type": "ipv6"}` with a single `{"type": "ip_address", "version": <4|6>}` schema.
+
+The protocol version is now 0.12.
+
 ## 0.5.0 - 2026-04-29
 
 This release changes the `one_of` protocol request to return a tuple of `[index, value]`, rather than just `value`.
