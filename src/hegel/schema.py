@@ -140,7 +140,7 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
         return urls()
     if schema_type == "domain":
         return domains(max_length=schema.get("max_length", 255))
-    if schema_type == "ip_addresses":
+    if schema_type == "ip_address":
         return st.ip_addresses(v=schema["version"]).map(str)
     if schema_type == "date":
         return st.dates().map(lambda d: d.isoformat())

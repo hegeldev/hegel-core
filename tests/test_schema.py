@@ -91,8 +91,8 @@ def primitive_hashable_schemas():
         )
         | string_schemas()
         | st.just({"type": "email"})
-        | st.just({"type": "ip_addresses", "version": 4})
-        | st.just({"type": "ip_addresses", "version": 6})
+        | st.just({"type": "ip_address", "version": 4})
+        | st.just({"type": "ip_address", "version": 6})
         | st.just({"type": "date"})
         | st.just({"type": "time"})
         | st.just({"type": "datetime"})
@@ -279,12 +279,12 @@ def test_ipv4():
         parts = x.split(".")
         return len(parts) == 4 and all(0 <= int(p) <= 255 for p in parts)
 
-    assert_all_examples(from_schema({"type": "ip_addresses", "version": 4}), check)
+    assert_all_examples(from_schema({"type": "ip_address", "version": 4}), check)
 
 
 def test_ipv6():
     assert_all_examples(
-        from_schema({"type": "ip_addresses", "version": 6}), lambda x: ":" in x
+        from_schema({"type": "ip_address", "version": 6}), lambda x: ":" in x
     )
 
 

@@ -324,7 +324,7 @@ These generators produce formatted strings.
 | `emails()` | `{"type": "email"}` |
 | `urls()` | `{"type": "url"}` |
 | `domains()` | `{"type": "domain", "max_length": <int>}` |
-| `ip_addresses()` | `{"type": "ip_addresses", "version": 4}`, `{"type": "ip_addresses", "version": 6}`, or `{"type": "one_of", "generators": [{"type": "ip_addresses", "version": 4}, {"type": "ip_addresses", "version": 6}]}` |
+| `ip_addresses()` | `{"type": "ip_address", "version": 4}`, `{"type": "ip_address", "version": 6}`, or `{"type": "one_of", "generators": [{"type": "ip_address", "version": 4}, {"type": "ip_address", "version": 6}]}` |
 | `dates()` | `{"type": "date"}` |
 | `times()` | `{"type": "time"}` |
 | `datetimes()` | `{"type": "datetime"}` |
