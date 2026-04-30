@@ -24,7 +24,7 @@ from hegel.protocol.utils import (
 if TYPE_CHECKING:
     from hegel.protocol.stream import Stream
 
-PROTOCOL_VERSION = "0.11"
+PROTOCOL_VERSION = "0.12"
 HANDSHAKE_STRING = b"hegel_handshake_start"
 
 

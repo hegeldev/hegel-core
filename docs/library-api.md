@@ -91,7 +91,7 @@ A generator is basic (i.e. has a schema and optional transform) in these cases:
 | `booleans(...)` | Always | `{"type": "boolean", ...}` | None |
 | `text(...)` | Always | `{"type": "string", ...}` | None |
 | `binary(...)` | Always | `{"type": "binary", ...}` | None |
-| `just(value)` | Always | `{"constant": null}` | Returns the constant value, ignoring server input |
+| `just(value)` | Always | `{"type": "constant", "value": null}` | Returns the constant value, ignoring server input |
 | `sampled_from(values)` | Always | `{"type": "integer", "min_value": 0, "max_value": len-1}` | Returns `values[index]` |
 | `basic.map(f)` | Always | Same schema as `basic` | `f` composed with existing transform |
 | `nonbasic.map(f)` | Never | — | — |
@@ -268,7 +268,7 @@ Generate a constant value.
 **Parameters:**
 - `value`: The constant value to always return.
 
-**Schema:** `{"constant": null}`.
+**Schema:** `{"type": "constant", "value": null}`.
 
 The schema always uses `null` as the const value (the server generates a null,
 and the client-side transform returns the actual constant). This allows `just`
@@ -292,10 +292,6 @@ The server generates an index; the client-side transform returns
 `values[index]`.
 
 **Basic:** Always. Transform: `index -> values[index]`.
-
-Note: The index approach is canonical and used by all libraries except TypeScript,
-which uses a `{"sampled_from": [values...]}` schema for primitive types and
-falls back to compositional generation for non-primitive types.
 
 ### `from_regex`
 
@@ -328,7 +324,7 @@ These generators produce formatted strings.
 | `emails()` | `{"type": "email"}` |
 | `urls()` | `{"type": "url"}` |
 | `domains()` | `{"type": "domain", "max_length": <int>}` |
-| `ip_addresses()` | `{"type": "ipv4"}`, `{"type": "ipv6"}`, or `{"type": "one_of", "generators": [{"type": "ipv4"}, {"type": "ipv6"}]}` |
+| `ip_addresses()` | `{"type": "ip_address", "version": 4}`, `{"type": "ip_address", "version": 6}`, or `{"type": "one_of", "generators": [{"type": "ip_address", "version": 4}, {"type": "ip_address", "version": 6}]}` |
 | `dates()` | `{"type": "date"}` |
 | `times()` | `{"type": "time"}` |
 | `datetimes()` | `{"type": "datetime"}` |
@@ -1112,7 +1108,7 @@ reference for new implementations.
 - The `_raw_schema` and `_transform` attributes are accessed directly by
   combinators (they are nominally private but used within the module).
 - `sampled_from` uses the integer-index approach for all types.
-- `just` uses `{"constant": null}` schema with a transform that ignores input.
+- `just` uses `{"type": "constant", "value": null}` schema with a transform that ignores input.
 
 ### Rust
 
@@ -1127,7 +1123,7 @@ reference for new implementations.
 - `sampled_from` always uses the integer-index approach (matching the
   reference Python implementation) and is always basic.
 - `just` works with any `Clone + Send + Sync` type and always uses
-  `{"constant": null}` with a transform that returns the constant value.
+  `{"type": "constant", "value": null}` with a transform that returns the constant value.
 
 ### C++
 
