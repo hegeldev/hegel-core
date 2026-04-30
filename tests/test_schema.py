@@ -59,7 +59,7 @@ def regex_schemas(draw):
 
 def primitive_hashable_schemas():
     return (
-        st.just({"type": "null"})
+        st.just({"type": "constant", "value": None})
         | st.just({"type": "boolean"})
         | st.builds(
             lambda min_val, max_val: {
@@ -91,8 +91,8 @@ def primitive_hashable_schemas():
         )
         | string_schemas()
         | st.just({"type": "email"})
-        | st.just({"type": "ipv4"})
-        | st.just({"type": "ipv6"})
+        | st.just({"type": "ip_addresses", "version": 4})
+        | st.just({"type": "ip_addresses", "version": 6})
         | st.just({"type": "date"})
         | st.just({"type": "time"})
         | st.just({"type": "datetime"})
@@ -134,16 +134,6 @@ def schemas():
         | st.builds(
             lambda v: {"type": "constant", "value": v},
             v=st.none() | st.booleans() | st.integers() | st.text(max_size=5),
-        )
-        # sampled_from with JSON-serializable values
-        | st.builds(
-            lambda vs: {"type": "sampled_from", "values": vs},
-            vs=st.lists(
-                st.none() | st.booleans() | st.integers(),
-                min_size=1,
-                max_size=5,
-                unique=True,
-            ),
         ),
         # Recursive cases: schemas that contain other schemas
         lambda inner: (
@@ -195,10 +185,6 @@ def schemas():
         ),
         max_leaves=10,
     )
-
-
-def test_null():
-    assert_all_examples(from_schema({"type": "null"}), lambda x: x is None)
 
 
 def test_boolean():
@@ -293,11 +279,13 @@ def test_ipv4():
         parts = x.split(".")
         return len(parts) == 4 and all(0 <= int(p) <= 255 for p in parts)
 
-    assert_all_examples(from_schema({"type": "ipv4"}), check)
+    assert_all_examples(from_schema({"type": "ip_addresses", "version": 4}), check)
 
 
 def test_ipv6():
-    assert_all_examples(from_schema({"type": "ipv6"}), lambda x: ":" in x)
+    assert_all_examples(
+        from_schema({"type": "ip_addresses", "version": 6}), lambda x: ":" in x
+    )
 
 
 def test_date():
@@ -323,13 +311,6 @@ def test_const(v):
     assert_all_examples(from_schema({"type": "constant", "value": v}), lambda x: x == v)
 
 
-def test_sampled_from():
-    assert_all_examples(
-        from_schema({"type": "sampled_from", "values": [1, 2, 3]}),
-        lambda x: x in [1, 2, 3],
-    )
-
-
 def test_one_of():
     def check(v):
         if not (isinstance(v, tuple) and len(v) == 2):
@@ -343,7 +324,13 @@ def test_one_of():
 
     assert_all_examples(
         from_schema(
-            {"type": "one_of", "generators": [{"type": "boolean"}, {"type": "null"}]}
+            {
+                "type": "one_of",
+                "generators": [
+                    {"type": "boolean"},
+                    {"type": "constant", "value": None},
+                ],
+            }
         ),
         check,
     )
@@ -357,7 +344,7 @@ def test_one_of_tuple_structure():
                 "generators": [
                     {"type": "integer"},
                     {"type": "boolean"},
-                    {"type": "null"},
+                    {"type": "constant", "value": None},
                 ],
             }
         ),

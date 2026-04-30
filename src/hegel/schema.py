@@ -52,8 +52,6 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
 
     if schema_type == "constant":
         return st.just(schema["value"])
-    if schema_type == "sampled_from":
-        return st.sampled_from(schema["values"])
     if schema_type == "one_of":
         return st.one_of(
             [
@@ -61,8 +59,6 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
                 for i, s in enumerate(schema["generators"])
             ]
         )
-    if schema_type == "null":
-        return st.none()
     if schema_type == "boolean":
         return BooleansStrategy(schema.get("p", 0.5))
     if schema_type == "integer":
@@ -144,10 +140,8 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
         return urls()
     if schema_type == "domain":
         return domains(max_length=schema.get("max_length", 255))
-    if schema_type == "ipv4":
-        return st.ip_addresses(v=4).map(str)
-    if schema_type == "ipv6":
-        return st.ip_addresses(v=6).map(str)
+    if schema_type == "ip_addresses":
+        return st.ip_addresses(v=schema["version"]).map(str)
     if schema_type == "date":
         return st.dates().map(lambda d: d.isoformat())
     if schema_type == "time":
