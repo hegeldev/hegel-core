@@ -478,8 +478,9 @@ def test_health_check_no_failure_by_default(client):
     client.run_test(test, test_cases=10)
 
 
-def test_filter_too_much_detected(client):
+def test_filter_too_much_detected(client, monkeypatch):
     """Test that always calls assume(False) triggers filter_too_much health check."""
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
 
     def test():
         generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
@@ -510,13 +511,14 @@ def test_bad_health_check_name(client):
         client.run_test(test, test_cases=10, suppress_health_check=["not_a_real_check"])
 
 
-def test_data_too_large_detected(client):
+def test_data_too_large_detected(client, monkeypatch):
     """Generating too much data per test case triggers test_cases_too_large.
 
     We suppress large_initial_test_case so the zero-input check passes,
     then the health check period fires test_cases_too_large when inputs
     repeatedly overrun the entropy budget.
     """
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
 
     def test():
         for _ in range(500):
@@ -574,6 +576,7 @@ def test_too_slow_detected(client, monkeypatch):
     """Slow draw operations trigger too_slow health check."""
     import hegel.server
 
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
     warp = _make_time_warp(monkeypatch)
     original = hegel.server.from_schema
 
@@ -621,8 +624,9 @@ def test_too_slow_suppressed(client, monkeypatch):
     client.run_test(test, test_cases=100, suppress_health_check=["too_slow"])
 
 
-def test_large_base_example_detected(client):
+def test_large_base_example_detected(client, monkeypatch):
     """A test whose simplest input is very large triggers large_initial_test_case."""
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
 
     def test():
         # Generate many large collections - even the simplest input will be large
@@ -665,6 +669,53 @@ def test_large_base_example_suppressed(client):
             "too_slow",
         ],
     )
+
+
+def test_antithesis_disables_all_health_checks(client, monkeypatch, tmp_path):
+    """Under ANTITHESIS_OUTPUT_DIR, all health checks are suppressed even
+    when the client does not request suppression."""
+    monkeypatch.setenv("ANTITHESIS_OUTPUT_DIR", str(tmp_path))
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        assume(False)
+
+    # Without Antithesis suppression this would raise HealthCheckFailure
+    # for filter_too_much.
+    client.run_test(test, test_cases=100)
+
+
+def test_antithesis_disables_database(client, monkeypatch, tmp_path):
+    """Under ANTITHESIS_OUTPUT_DIR, the example database is forced off,
+    even when the client requests one."""
+    from hypothesis import HealthCheck, settings as real_settings
+
+    import hegel.server
+
+    monkeypatch.setenv("ANTITHESIS_OUTPUT_DIR", str(tmp_path))
+
+    captured: dict = {}
+
+    def capture_settings(**kwargs):
+        captured.update(kwargs)
+        return real_settings(**kwargs)
+
+    monkeypatch.setattr(hegel.server, "settings", capture_settings)
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    db_path = tmp_path / "client-requested-db"
+    client.run_test(
+        test,
+        test_cases=5,
+        database=str(db_path),
+        database_key=b"some_key",
+    )
+
+    assert captured["database"] is None
+    assert set(captured["suppress_health_check"]) == set(HealthCheck)
+    assert not db_path.exists()
 
 
 def test_flaky_data_generation(client, monkeypatch):
