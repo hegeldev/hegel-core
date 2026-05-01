@@ -121,6 +121,7 @@ class Client:
         database_key: bytes | None = None,
         derandomize: bool = False,
         database: str | None | UniqueIdentifier = not_set,
+        phases: list[str] | None = None,
     ) -> None:
         """Run a property test."""
 
@@ -139,6 +140,8 @@ class Client:
             message["database"] = database
         if suppress_health_check:
             message["suppress_health_check"] = suppress_health_check
+        if phases is not None:
+            message["phases"] = phases
 
         with self.__lock:
             self._control.send_request(message)
