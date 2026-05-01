@@ -422,16 +422,6 @@ def _single_test_case(
         raise
 
 
-_PHASE_MAP: dict[str, Phase] = {
-    "explicit": Phase.explicit,
-    "reuse": Phase.reuse,
-    "generate": Phase.generate,
-    "target": Phase.target,
-    "shrink": Phase.shrink,
-    "explain": Phase.explain,
-}
-
-
 def _run_test(
     connection: Connection,
     stream: Stream,
@@ -501,7 +491,29 @@ def _run_test(
         if isinstance(database, str):
             database = DirectoryBasedExampleDatabase(database)  # type: ignore
 
-        phase_list = [_PHASE_MAP[p] for p in (phases or []) if p in _PHASE_MAP] or None
+        phase_list = None
+        for name in phases or []:
+            try:
+                phase = Phase(name)
+            except ValueError:
+                valid = [p.value for p in Phase]
+                result: dict[str, Any] = {
+                    "passed": False,
+                    "test_cases": 0,
+                    "valid_test_cases": 0,
+                    "invalid_test_cases": 0,
+                    "interesting_test_cases": 0,
+                    "seed": str(seed),
+                    "error": (
+                        f"Unknown phase: {name!r}. "
+                        f"Valid phases are: {valid}"
+                    ),
+                }
+                stream.send_request({"event": "test_done", "results": result}).get()
+                return result
+            if phase_list is None:
+                phase_list = []
+            phase_list.append(phase)
 
         settings_kwargs = {
             "deadline": None,
