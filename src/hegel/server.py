@@ -9,7 +9,7 @@ from random import Random
 from typing import Any
 
 import cbor2
-from hypothesis import HealthCheck, settings
+from hypothesis import HealthCheck, Phase, settings
 from hypothesis.control import BuildContext
 from hypothesis.core import decode_failure, encode_failure
 from hypothesis.database import DirectoryBasedExampleDatabase
@@ -339,6 +339,7 @@ def run_server_on_connection(connection: Connection) -> None:
                             ),
                             derandomize=message.get("derandomize", False),
                             database=message.get("database", not_set),
+                            phases=message.get("phases"),
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
@@ -421,6 +422,16 @@ def _single_test_case(
         raise
 
 
+_PHASE_MAP: dict[str, Phase] = {
+    "explicit": Phase.explicit,
+    "reuse": Phase.reuse,
+    "generate": Phase.generate,
+    "target": Phase.target,
+    "shrink": Phase.shrink,
+    "explain": Phase.explain,
+}
+
+
 def _run_test(
     connection: Connection,
     stream: Stream,
@@ -432,6 +443,7 @@ def _run_test(
     suppress_health_check: list[str] | None,
     derandomize: bool,
     database: str | UniqueIdentifier | None,
+    phases: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run a single test using ConjectureRunner.
 
@@ -489,12 +501,15 @@ def _run_test(
         if isinstance(database, str):
             database = DirectoryBasedExampleDatabase(database)  # type: ignore
 
+        phase_list = [_PHASE_MAP[p] for p in (phases or []) if p in _PHASE_MAP] or None
+
         settings_kwargs = {
             "deadline": None,
             "max_examples": test_cases,
             "suppress_health_check": suppress,
             "backend": "hypothesis-urandom" if antithesis else "hypothesis",
             **({} if database is not_set else {"database": database}),
+            **({"phases": phase_list} if phase_list is not None else {}),
         }
 
         state = HegelState(connection, stream)
