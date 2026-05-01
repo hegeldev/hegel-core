@@ -521,6 +521,16 @@ def test_bad_phase_name(client):
         client.run_test(test, test_cases=10, phases=["not_a_real_phase"])
 
 
+def test_phases_restricts_run(client):
+    """Passing a phases list is accepted and restricts which phases run."""
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    client.run_test(test, test_cases=10, phases=["generate"])
+    assert client.last_result["passed"]
+
+
 def test_data_too_large_detected(client, monkeypatch):
     """Generating too much data per test case triggers test_cases_too_large.
 
