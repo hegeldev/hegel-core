@@ -497,20 +497,19 @@ def _run_test(
                 phase = Phase(name)
             except ValueError:
                 valid = [p.value for p in Phase]
-                result: dict[str, Any] = {
+                error_result: dict[str, Any] = {
                     "passed": False,
                     "test_cases": 0,
                     "valid_test_cases": 0,
                     "invalid_test_cases": 0,
                     "interesting_test_cases": 0,
                     "seed": str(seed),
-                    "error": (
-                        f"Unknown phase: {name!r}. "
-                        f"Valid phases are: {valid}"
-                    ),
+                    "error": f"Unknown phase: {name!r}. Valid phases are: {valid}",
                 }
-                stream.send_request({"event": "test_done", "results": result}).get()
-                return result
+                stream.send_request(
+                    {"event": "test_done", "results": error_result}
+                ).get()
+                return error_result
             if phase_list is None:
                 phase_list = []
             phase_list.append(phase)

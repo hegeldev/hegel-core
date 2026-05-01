@@ -511,6 +511,16 @@ def test_bad_health_check_name(client):
         client.run_test(test, test_cases=10, suppress_health_check=["not_a_real_check"])
 
 
+def test_bad_phase_name(client):
+    """Sending an invalid phase name reports a clear error."""
+
+    def test():
+        generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+
+    with pytest.raises(ValueError, match=r"Unknown phase.*'not_a_real_phase'"):
+        client.run_test(test, test_cases=10, phases=["not_a_real_phase"])
+
+
 def test_data_too_large_detected(client, monkeypatch):
     """Generating too much data per test case triggers test_cases_too_large.
 
