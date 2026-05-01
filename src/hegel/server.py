@@ -473,6 +473,16 @@ def _run_test(
                 stream.send_request({"event": "test_done", "results": result}).get()
                 return result
 
+        antithesis = bool(os.environ.get("ANTITHESIS_OUTPUT_DIR"))
+
+        if antithesis:
+            # Health checks measure properties (timing, filter rate, base
+            # example size) that are meaningless under Antithesis's
+            # deterministic simulator, and the example database can leak
+            # state between simulated runs.
+            suppress = list(HealthCheck)
+            database = None
+
         if database is None:
             database_key = None
 
@@ -483,11 +493,7 @@ def _run_test(
             "deadline": None,
             "max_examples": test_cases,
             "suppress_health_check": suppress,
-            "backend": (
-                "hypothesis-urandom"
-                if os.environ.get("ANTITHESIS_OUTPUT_DIR")
-                else "hypothesis"
-            ),
+            "backend": "hypothesis-urandom" if antithesis else "hypothesis",
             **({} if database is not_set else {"database": database}),
         }
 
