@@ -527,7 +527,7 @@ def test_phases_restricts_run(client):
     def test():
         generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
 
-    client.run_test(test, test_cases=10, phases=["generate"])
+    client.run_test(test, test_cases=10, phases=["reuse", "generate", "shrink"])
     assert client.last_result["passed"]
 
 
