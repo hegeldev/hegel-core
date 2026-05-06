@@ -148,6 +148,8 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
         return st.times().map(lambda t: t.isoformat())
     if schema_type == "datetime":
         return st.datetimes().map(lambda dt: dt.isoformat())
+    if schema_type == "uuid":
+        return st.uuids(version=schema.get("version")).map(str)
 
     raise ValueError(f"Unsupported schema: {schema}")
 
