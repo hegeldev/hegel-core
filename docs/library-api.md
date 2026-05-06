@@ -328,6 +328,11 @@ These generators produce formatted strings.
 | `dates()` | `{"type": "date"}` |
 | `times()` | `{"type": "time"}` |
 | `datetimes()` | `{"type": "datetime"}` |
+| `uuids()` | `{"type": "uuid"}` or `{"type": "uuid", "version": <1\|2\|3\|4\|5>}` |
+
+UUID values are returned as strings in the canonical hyphenated form
+(e.g. `"f47ac10b-58cc-4372-a567-0e02b2c3d479"`). When `version` is omitted,
+the server picks a version.
 
 **Basic:** Always. No transform.
 

@@ -1,5 +1,6 @@
 import io
 import re
+import uuid
 from fractions import Fraction
 
 import cbor2
@@ -96,6 +97,11 @@ def primitive_hashable_schemas():
         | st.just({"type": "date"})
         | st.just({"type": "time"})
         | st.just({"type": "datetime"})
+        | st.just({"type": "uuid"})
+        | st.builds(
+            lambda v: {"type": "uuid", "version": v},
+            v=st.sampled_from([1, 2, 3, 4, 5]),
+        )
     )
 
 
@@ -304,6 +310,24 @@ def test_time():
 
 def test_datetime():
     assert_all_examples(from_schema({"type": "datetime"}), lambda x: "T" in x)
+
+
+def test_uuid():
+    def check(x):
+        if not isinstance(x, str):
+            return False
+        parsed = uuid.UUID(x)
+        return str(parsed) == x
+
+    assert_all_examples(from_schema({"type": "uuid"}), check)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
+def test_uuid_version(version):
+    assert_all_examples(
+        from_schema({"type": "uuid", "version": version}),
+        lambda x: uuid.UUID(x).version == version,
+    )
 
 
 @given(st.integers() | st.text())
