@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 - 2026-05-06
+
+This patch adds support for the `uuid` schema type, exposing Hypothesis's
+`uuids` strategy. UUIDs are returned to the client as strings in the
+canonical hyphenated form. An optional `version` field selects a specific
+UUID version (1-5).
+
 ## 0.7.0 - 2026-05-01
 
 This release adds support for the `phases` parameter in the `run_test` protocol message,
