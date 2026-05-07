@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import random
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from random import Random
@@ -29,6 +30,13 @@ from hypothesis.internal.conjecture.providers import (
 )
 from hypothesis.internal.conjecture.shrinker import sort_key
 from hypothesis.internal.conjecture.utils import calc_label_from_name, many
+from hypothesis.internal.observability import (
+    InfoObservation,
+    deliver_observation,
+    make_testcase,
+    observability_enabled,
+)
+from hypothesis.statistics import describe_statistics
 
 from hegel.protocol import Connection, ProtocolError, Stream
 from hegel.schema import _encode_value, from_schema
@@ -167,27 +175,60 @@ class HegelState:
         self,
         connection: Connection,
         stream: Stream,
-        *,
-        is_final: bool = False,
     ):
         self._connection = connection
         self._stream = stream
-        self._is_final = is_final
         self.flaky_error: Flaky | None = None
+        self._run_start = time.time()
+        self._timing_features: dict[str, float] = {}
+        # Late-bound by ``_run_test`` after the runner is constructed (the
+        # runner needs ``execute_once_for_engine`` as its test function, so
+        # we can't pass it to ``HegelState.__init__``). Read by
+        # ``execute_once_for_engine`` to tag each observation with the
+        # runner's current phase, matching hypothesis.core's
+        # ``self._runner = runner`` pattern.
+        self._runner: ConjectureRunner | None = None
 
-    def test_function(self, data: ConjectureData) -> None:
+    def execute_once_for_engine(self, data: ConjectureData) -> None:
+        try:
+            self.execute_once(data, is_final=False)
+        finally:
+            data.freeze()
+            if observability_enabled():
+                assert self._runner is not None
+                phase = self._runner._current_phase
+                backend_name = self._runner.settings.backend
+                switched = self._runner._switch_to_hypothesis_provider
+                backend_desc = (
+                    f", using backend={backend_name!r}"
+                    if backend_name != "hypothesis" and not switched
+                    else ""
+                )
+                deliver_observation(
+                    make_testcase(
+                        run_start=self._run_start,
+                        property="<unknown>",
+                        data=data,
+                        how_generated=f"during {phase} phase{backend_desc}",
+                        timing=self._timing_features,
+                        phase=phase,
+                    )
+                )
+
+    def execute_once(self, data: ConjectureData, *, is_final: bool) -> None:
+        self._timing_features = {}
         collections: dict[int, many] = {}
         variable_pools: list[Variables] = []
         collection_id_counter = itertools.count()
         generate_count = 0
 
-        with BuildContext(data, is_final=self._is_final, wrapped_test=None):  # type: ignore
+        with BuildContext(data, is_final=is_final, wrapped_test=None):  # type: ignore
             test_case_stream = self._connection.new_stream(role="Test Case")
             self._stream.send_request(
                 {
                     "event": "test_case",
                     "stream_id": test_case_stream.stream_id,
-                    "is_final": self._is_final,
+                    "is_final": is_final,
                 },
             ).get()
 
@@ -291,11 +332,21 @@ class HegelState:
                     self.flaky_error = e
                     raise
 
+            start = time.perf_counter()
             try:
                 test_case_stream.handle_requests(
                     handle_client_request, until=lambda: done
                 )
             finally:
+                # ``"overall"`` is the wall time of ``handle_requests``,
+                # conflating client test execution and protocol round-trip —
+                # the server can't separate them without per-call reports
+                # from the client. ``data.draw_times`` adds per-strategy
+                # server-side draw time.
+                self._timing_features = {
+                    "overall": time.perf_counter() - start,
+                    **data.draw_times,
+                }
                 server_metrics_file = os.environ.get("CONFORMANCE_SERVER_METRICS_FILE")
                 if server_metrics_file is not None:
                     with open(server_metrics_file, "a", encoding="utf-8") as mf:
@@ -401,10 +452,20 @@ def _single_test_case(
         )
         data.max_length = 2**64
 
-        state = HegelState(connection, stream, is_final=True)
+        state = HegelState(connection, stream)
         with contextlib.suppress(StopTest):
-            state.test_function(data)
+            state.execute_once(data, is_final=True)
         data.freeze()
+        if observability_enabled():
+            deliver_observation(
+                make_testcase(
+                    run_start=state._run_start,
+                    property="<unknown>",
+                    data=data,
+                    how_generated="explicit example",
+                    timing=state._timing_features,
+                )
+            )
 
         result: dict[str, Any] = {
             "passed": data.status is not Status.INTERESTING,
@@ -525,17 +586,28 @@ def _run_test(
 
         state = HegelState(connection, stream)
         runner = ConjectureRunner(
-            state.test_function,
+            state.execute_once_for_engine,
             settings=settings(**settings_kwargs),  # type: ignore
             random=Random(seed),
             database_key=database_key,
         )
+        state._runner = runner
         try:
             if failure_blob is not None:
                 choices = decode_failure(failure_blob)
                 data = ConjectureData.for_choices(choices)
                 with contextlib.suppress(StopTest):
-                    state.test_function(data)
+                    state.execute_once(data, is_final=False)
+                if observability_enabled():
+                    deliver_observation(
+                        make_testcase(
+                            run_start=state._run_start,
+                            property="<unknown>",
+                            data=data,
+                            how_generated="explicit example",
+                            timing=state._timing_features,
+                        )
+                    )
 
                 is_interesting = data.status is Status.INTERESTING
                 result = {
@@ -601,13 +673,35 @@ def _run_test(
             result["flaky"] = FLAKY_TEST_RESULT_MSG
 
         _write_run_metrics(result)
+        if observability_enabled() and failure_blob is None:
+            deliver_observation(
+                InfoObservation(
+                    type="info",
+                    run_start=state._run_start,
+                    property="<unknown>",
+                    title="Hegel Statistics",
+                    content=describe_statistics(runner.statistics),
+                )
+            )
+
         stream.send_request({"event": "test_done", "results": result}).get()
 
-        final_state = HegelState(connection, stream, is_final=True)
-
         for choices in interesting_choices:
+            data = ConjectureData.for_choices(choices)
             with contextlib.suppress(StopTest):
-                final_state.test_function(ConjectureData.for_choices(choices))
+                state.execute_once(data, is_final=True)
+            if observability_enabled():
+                origin = data.interesting_origin
+                deliver_observation(
+                    make_testcase(
+                        run_start=state._run_start,
+                        property="<unknown>",
+                        data=data,
+                        how_generated="minimal failing example",
+                        timing=state._timing_features,
+                        status_reason=str(origin or "unexpected/flaky pass"),
+                    )
+                )
 
         return result
     except Exception:

@@ -111,10 +111,7 @@ def _from_schema(schema: dict[str, Any]) -> SearchStrategy[Any]:
             schema["pattern"],
             fullmatch=schema.get("fullmatch", False),
             alphabet=(
-                # hypothesis typing bug, I think
-                None
-                if alphabet_schema is None
-                else st.characters(**alphabet_schema)  # type: ignore
+                None if alphabet_schema is None else st.characters(**alphabet_schema)
             ),
         )
     if schema_type == "list":

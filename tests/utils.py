@@ -6,9 +6,12 @@ class Found(Exception):
 
 
 def find_any(strategy, condition, *, settings=None):
+    if settings is None:
+        settings = Settings()
+
     @Settings(
         settings,
-        max_examples=1000,
+        max_examples=max(1000, settings.max_examples),
         phases=set(Phase) - {Phase.shrink},
         suppress_health_check=list(HealthCheck),
     )

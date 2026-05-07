@@ -113,7 +113,13 @@ def test_text_conformance_test_no_surrogates(s):
 
 
 def test_text_conformance_test_surrogates():
+    # Finding a surrogate-containing string requires several params-strategy
+    # gates to align (no codec, codepoint range covers 0xD800-0xDFFF, "Cs"
+    # not excluded etc.) AND st.characters to actually emit a surrogate
+    # (only 0x800 of ~0x110000 codepoints). The product of those probabilities
+    # is small enough that the default 1000 examples is flaky — bump it.
     find_any(
         _text_from_params(no_surrogates=False),
         lambda s: any(unicodedata.category(c) == "Cs" for c in s),
+        settings=settings(max_examples=20_000),
     )
