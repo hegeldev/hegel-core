@@ -103,7 +103,13 @@ def test_per_thread_callback_does_not_receive_server_observations(client):
     assert collected == []
 
 
-def test_passing_run_test(client):
+def test_passing_run_test(client, monkeypatch):
+    # This test asserts default-backend behavior (no "using backend" suffix in
+    # how_generated). The antithesis CI run sets ANTITHESIS_OUTPUT_DIR for the
+    # whole suite, which switches the runner to hypothesis-urandom and adds
+    # the suffix; clear it here so the default-backend assertions hold.
+    monkeypatch.delenv("ANTITHESIS_OUTPUT_DIR", raising=False)
+
     def test():
         generate_from_schema({"type": "integer", "min_value": 0, "max_value": 10_000})
         generate_from_schema({"type": "boolean"})
