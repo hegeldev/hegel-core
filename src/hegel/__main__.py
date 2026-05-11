@@ -85,7 +85,9 @@ def run_server_stdio(*, verbosity: Verbosity = Verbosity.normal) -> None:
     # Also redirect Python-level sys.stdout to stderr.
     sys.stdout = sys.stderr
 
-    protocol_reader = os.fdopen(protocol_in_fd, "rb")
+    # Keep stdin unbuffered so close() cannot block on a BufferedReader lock
+    # held by the background protocol reader thread.
+    protocol_reader = os.fdopen(protocol_in_fd, "rb", buffering=0)
     protocol_writer = os.fdopen(protocol_out_fd, "wb", buffering=0)
 
     if verbosity >= Verbosity.verbose:
