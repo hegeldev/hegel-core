@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2 - 2026-05-11
+
+This patch fixes a stdio-server shutdown deadlock that could occur under `uv`
+when the server exited after an error while stdin remained open.
+
 ## 0.8.1 - 2026-05-07
 
 This patch adds support for Hypothesis's observability feature: https://hypothesis.readthedocs.io/en/latest/reference/integrations.html#observability.
