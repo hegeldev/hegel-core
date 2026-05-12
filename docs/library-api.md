@@ -954,7 +954,7 @@ The following conformance tests are required:
 
 | Test | Parameters | Validates |
 |------|-----------|-----------|
-| `BooleanConformance` | (none) | Value is `true` or `false` |
+| `BooleanConformance` | (no parameters) | Value is `true` or `false` |
 | `IntegerConformance` | `min_value`, `max_value` | Value within bounds |
 | `FloatConformance` | `min_value`, `max_value`, `exclude_min`, `exclude_max`, `allow_nan`, `allow_infinity` | Value within bounds, NaN/infinity generated when allowed |
 | `TextConformance` | `min_size`, `max_size` | Codepoint length within bounds |
