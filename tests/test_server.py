@@ -398,6 +398,26 @@ def test_multiple_blobs(client):
     assert len(client.last_result["failure_blobs"]) == 2
 
 
+def test_report_multiple_failures_false_collapses_blobs(client):
+    """`report_multiple_failures=False` maps to Hypothesis's
+    `report_multiple_bugs=False`, which surfaces only the first failure
+    even when the run found several distinct ones.
+    """
+
+    def test():
+        x = generate_from_schema({"type": "integer", "min_value": 0, "max_value": 100})
+        assert x <= 10
+
+        y = generate_from_schema({"type": "integer", "min_value": -10, "max_value": -1})
+        assert y >= 0
+
+    with pytest.raises(Exception) as exc_info:
+        client.run_test(test, test_cases=50, report_multiple_failures=False)
+    # Single failure: a bare exception, not an ExceptionGroup.
+    assert not isinstance(exc_info.value, ExceptionGroup)
+    assert len(client.last_result["failure_blobs"]) == 1
+
+
 def test_derandomize_with_database_key(client):
     """Tests that derandomize=True derives seed from database_key."""
 

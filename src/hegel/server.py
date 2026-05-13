@@ -391,6 +391,9 @@ def run_server_on_connection(connection: Connection) -> None:
                             derandomize=message.get("derandomize", False),
                             database=message.get("database", not_set),
                             phases=message.get("phases"),
+                            report_multiple_failures=message.get(
+                                "report_multiple_failures", True
+                            ),
                         ),
                     )
                     connection.control_stream.write_reply(packet.message_id, True)
@@ -495,6 +498,7 @@ def _run_test(
     derandomize: bool,
     database: str | UniqueIdentifier | None,
     phases: list[str] | None = None,
+    report_multiple_failures: bool = True,
 ) -> dict[str, Any]:
     """Run a single test using ConjectureRunner.
 
@@ -580,6 +584,7 @@ def _run_test(
             "max_examples": test_cases,
             "suppress_health_check": suppress,
             "backend": "hypothesis-urandom" if antithesis else "hypothesis",
+            "report_multiple_bugs": report_multiple_failures,
             **({} if database is not_set else {"database": database}),
             **({"phases": phase_list} if phase_list is not None else {}),
         }
