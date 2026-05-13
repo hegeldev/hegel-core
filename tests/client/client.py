@@ -122,6 +122,7 @@ class Client:
         derandomize: bool = False,
         database: str | None | UniqueIdentifier = not_set,
         phases: list[str] | None = None,
+        report_multiple_failures: bool | None = None,
     ) -> None:
         """Run a property test."""
 
@@ -142,6 +143,8 @@ class Client:
             message["suppress_health_check"] = suppress_health_check
         if phases is not None:
             message["phases"] = phases
+        if report_multiple_failures is not None:
+            message["report_multiple_failures"] = report_multiple_failures
 
         with self.__lock:
             self._control.send_request(message)
