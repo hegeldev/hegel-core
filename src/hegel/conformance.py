@@ -391,8 +391,6 @@ class FloatConformance(ConformanceTest):
         binary_path: str | Path,
         test_cases: int = default_test_cases,
         *,
-        # Erlang does not allow inf or NaN in floats, so this
-        # needs to be configurable
         allow_infinity: bool | None = None,
         allow_nan: bool | None = None,
         skip_server_metrics: bool = False,
