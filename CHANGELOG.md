@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 - 2026-05-15
+
+This release adds the `allow_nan` and `allow_infinity` boolean arguments to `FloatConformance()`. This makes it possible for clients where infinity or nan is not supported to run float conformance tests.
+
 ## 0.9.0 - 2026-05-13
 
 This release adds a `report_multiple_failures` field to the `run_test`
