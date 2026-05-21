@@ -364,7 +364,7 @@ class HegelState:
                             )
                         )
                         return state_machine_id
-                    elif command == "next_rule":
+                    elif command == "state_machine_next_rule":
                         state_machine = state_machines[message["state_machine_id"]]
                         return state_machine.next_rule(data)
                     else:

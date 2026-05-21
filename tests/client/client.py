@@ -377,7 +377,12 @@ def run_state_machine(
 
     check_invariants()
     for _ in range(steps):
-        index = _request({"command": "next_rule", "state_machine_id": state_machine_id})
+        index = _request(
+            {
+                "command": "state_machine_next_rule",
+                "state_machine_id": state_machine_id,
+            }
+        )
         try:
             rules[index]()
         except AssumeRejected:
