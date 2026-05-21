@@ -10,7 +10,7 @@ from random import Random
 from typing import Any
 
 import cbor2
-from hypothesis import HealthCheck, Phase, settings
+from hypothesis import HealthCheck, Phase, settings, strategies as st
 from hypothesis.control import BuildContext
 from hypothesis.core import decode_failure, encode_failure
 from hypothesis.database import DirectoryBasedExampleDatabase
@@ -37,6 +37,10 @@ from hypothesis.internal.observability import (
     observability_enabled,
 )
 from hypothesis.statistics import describe_statistics
+from hypothesis.strategies._internal.featureflags import (
+    FeatureFlags,
+    FeatureStrategy,
+)
 
 from hegel.protocol import Connection, ProtocolError, Stream
 from hegel.schema import _encode_value, from_schema
@@ -161,6 +165,37 @@ class Variables:
         return self.last_id
 
 
+class StateMachine:
+    """Server-side driver for a single stateful (rule-based) test case.
+
+    The client registers a fixed set of rules and asks the server which
+    rule to run at each step. Centralising rule choice here lets the
+    server, rather than each library, own selection.
+    """
+
+    def __init__(
+        self,
+        rules: list[dict[str, Any]],
+        invariants: list[dict[str, Any]],
+    ) -> None:
+        self.rules = rules
+        # Invariants are registered for observability and future use (e.g.
+        # per-invariant metrics, or swarm-gating invariants); the server
+        # does not drive invariant execution itself.
+        self.invariants = invariants
+        self._rules_strategy = st.sampled_from(range(len(rules)))
+        # swarm testing
+        self._feature_strategy = FeatureStrategy(
+            at_least_one_of=frozenset(range(len(rules)))
+        )
+        self._feature_flags: FeatureFlags | None = None
+
+    def next_rule(self, data: ConjectureData) -> int:
+        if self._feature_flags is None:
+            self._feature_flags = data.draw(self._feature_strategy)
+        return data.draw(self._rules_strategy.filter(self._feature_flags.is_enabled))
+
+
 class HegelState:
     """State for a test run that communicates with the client.
 
@@ -219,6 +254,7 @@ class HegelState:
         self._timing_features = {}
         collections: dict[int, many] = {}
         variable_pools: list[Variables] = []
+        state_machines: list[StateMachine] = []
         collection_id_counter = itertools.count()
         generate_count = 0
 
@@ -319,6 +355,18 @@ class HegelState:
                         if consume:
                             pool.consume(v)
                         return v
+                    elif command == "new_state_machine":
+                        state_machine_id = len(state_machines)
+                        state_machines.append(
+                            StateMachine(
+                                message["rules"],
+                                message["invariants"],
+                            )
+                        )
+                        return state_machine_id
+                    elif command == "next_rule":
+                        state_machine = state_machines[message["state_machine_id"]]
+                        return state_machine.next_rule(data)
                     else:
                         raise ValueError(f"Unknown command: {command}")
                 except UnsatisfiedAssumption:
