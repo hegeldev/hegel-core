@@ -6,6 +6,7 @@ import random
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from random import Random
 from typing import Any
 
@@ -165,6 +166,16 @@ class Variables:
         return self.last_id
 
 
+@dataclass(frozen=True)
+class Rule:
+    name: str
+
+
+@dataclass(frozen=True)
+class Invariant:
+    name: str
+
+
 class StateMachine:
     """Server-side driver for a single stateful (rule-based) test case.
 
@@ -175,8 +186,8 @@ class StateMachine:
 
     def __init__(
         self,
-        rules: list[dict[str, Any]],
-        invariants: list[dict[str, Any]],
+        rules: list[Rule],
+        invariants: list[Invariant],
     ) -> None:
         self.rules = rules
         # Invariants are registered for observability and future use (e.g.
@@ -359,8 +370,11 @@ class HegelState:
                         state_machine_id = len(state_machines)
                         state_machines.append(
                             StateMachine(
-                                message["rules"],
-                                message["invariants"],
+                                rules=[Rule(**rule) for rule in message["rules"]],
+                                invariants=[
+                                    Invariant(**invariant)
+                                    for invariant in message["invariants"]
+                                ],
                             )
                         )
                         return state_machine_id

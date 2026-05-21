@@ -1,6 +1,10 @@
 """Tests for stateful (rule-based) testing and swarm rule selection."""
 
+import pytest
+
+from hegel.protocol import RequestError
 from tests.client import assume, run_state_machine
+from tests.client.client import _request
 
 
 def _longest_run(sequence: list[int]) -> int:
@@ -71,3 +75,20 @@ def test_invariants_run_and_assume_skips_a_step(client):
 
     client.run_test(test, test_cases=30, seed=0, database=None)
     assert client.last_result["passed"]
+
+
+def test_state_machine_rejects_malformed_rule(client):
+    """A rule whose shape does not match the protocol is rejected when the
+    state machine is registered, rather than being silently accepted."""
+
+    def test():
+        with pytest.raises(RequestError):
+            _request(
+                {
+                    "command": "new_state_machine",
+                    "rules": [{"name": "ok"}, {"label": "wrong key"}],
+                    "invariants": [],
+                }
+            )
+
+    client.run_test(test, test_cases=1, database=None)
