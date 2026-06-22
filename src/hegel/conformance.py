@@ -386,6 +386,21 @@ class IntegerConformance(ConformanceTest):
 class FloatConformance(ConformanceTest):
     default_test_cases = 500  # NaN/infinity are rare, need more samples
 
+    def __init__(
+        self,
+        binary_path: str | Path,
+        test_cases: int = default_test_cases,
+        *,
+        allow_infinity: bool | None = None,
+        allow_nan: bool | None = None,
+        skip_server_metrics: bool = False,
+    ):
+        super().__init__(
+            binary_path, test_cases, skip_server_metrics=skip_server_metrics
+        )
+        self.allow_infinity = allow_infinity
+        self.allow_nan = allow_nan
+
     def params_strategy(self) -> st.SearchStrategy[dict[str, Any]]:
         @st.composite
         def strategy(draw: st.DrawFn) -> dict[str, Any]:
@@ -434,17 +449,23 @@ class FloatConformance(ConformanceTest):
             # letting the library apply its own defaults (which must match
             # Hypothesis: nan disallowed when any bound is set, infinity
             # disallowed when both bounds are set).
-            allow_nan: bool | None = draw(
-                st.sampled_from(
-                    [None, False] + ([] if (use_min_value or use_max_value) else [True])
-                ),
-            )
-            allow_infinity: bool | None = draw(
-                st.sampled_from(
-                    [None, False]
-                    + ([] if (use_min_value and use_max_value) else [True])
-                ),
-            )
+            allow_nan = self.allow_nan
+            if allow_nan is None:
+                allow_nan = draw(
+                    st.sampled_from(
+                        [None, False]
+                        + ([] if (use_min_value or use_max_value) else [True])
+                    ),
+                )
+
+            allow_infinity = self.allow_infinity
+            if allow_infinity is None:
+                allow_infinity = draw(
+                    st.sampled_from(
+                        [None, False]
+                        + ([] if (use_min_value and use_max_value) else [True])
+                    ),
+                )
 
             return {
                 "min_value": min_value,
