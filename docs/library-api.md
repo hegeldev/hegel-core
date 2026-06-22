@@ -952,7 +952,7 @@ the binary, and validates each line of output against the constraints.
 
 The following conformance tests are required:
 
-| Test | Parameters | Validates | 
+| Test | Parameters | Validates |
 |------|-----------|-----------|
 | `BooleanConformance` | (no parameters) | Value is `true` or `false` |
 | `IntegerConformance` | `min_value`, `max_value` | Value within bounds |
@@ -962,8 +962,6 @@ The following conformance tests are required:
 | `ListConformance` | `min_size`, `max_size`, `min_value`, `max_value` | Size within bounds, elements within bounds |
 | `SampledFromConformance` | `options` (list of integers) | Value is one of the options |
 | `DictConformance` | `min_size`, `max_size`, `key_type`, `min_key`, `max_key`, `min_value`, `max_value` | Size within bounds, keys and values within bounds |
-
-<!-- I don't want to break the code lol but any reason not to sort the above table in alphabetical order? It would improve scannability -->
 
 Integer-related bounds (`min_value`, `max_value` for `IntegerConformance`,
 `ListConformance`, `DictConformance`) should be set to the language's native
