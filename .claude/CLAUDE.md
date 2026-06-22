@@ -39,7 +39,8 @@ Binary protocol over stdin/stdout with CBOR-encoded payloads:
 - 20-byte header + variable payload + terminator byte: magic `0x4845474C` (HEGL), CRC32, stream ID, message ID, payload length
 - Stream 0 is the control stream; odd-numbered streams are client-created, even-numbered are server-created
 - Reply bit (`1 << 31`) in message ID distinguishes requests from replies
-- Commands: `generate`, `start_span`, `stop_span`, `target`, `mark_complete`, `new_collection`, `collection_more`, `collection_reject`, `new_pool`, `pool_add`, `pool_generate`, `pool_consume`
+- Commands: `generate`, `start_span`, `stop_span`, `target`, `mark_complete`, `new_collection`, `collection_more`, `collection_reject`, `new_pool`, `pool_add`, `pool_generate`, `pool_consume`, `new_state_machine`, `state_machine_next_rule`
+- `PROTOCOL_VERSION` (in `protocol/connection.py`) is reported to clients during the handshake. **Bump it for any change to the wire protocol** — adding a command or a field, renaming or removing one, or otherwise breaking compatibility.
 
 ### Module Overview
 

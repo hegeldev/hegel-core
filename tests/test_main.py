@@ -12,6 +12,8 @@ from click.testing import CliRunner
 from hypothesis import Verbosity
 
 from hegel.__main__ import StdioTransport, main, run_server_stdio
+from hegel.protocol.connection import HANDSHAKE_STRING, PROTOCOL_VERSION
+from hegel.protocol.packet import Packet, read_packet, write_packet
 from tests.client import Client, ClientConnection
 
 
@@ -181,3 +183,54 @@ def test_run_server_stdio_debug():
 
 def test_run_server_stdio_test_mode():
     _run_stdio_test(env={"HEGEL_PROTOCOL_TEST_MODE": "empty_test"})
+
+
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason=(
+        "Stdin doesn't close on Windows after a server-side error, so the "
+        "reader thread blocks instead of shutting down cleanly. "
+        "See https://github.com/hegeldev/hegel-core/issues/130."
+    ),
+    strict=False,
+)
+def test_run_server_stdio_closes_after_error_with_open_stdin(monkeypatch):
+    monkeypatch.setenv("HEGEL_PROTOCOL_TEST_MODE", "not-a-real-mode")
+
+    with _redirect_stdio_to_pipes() as (client_read_fd, client_write_fd):
+        errors = []
+
+        def run():
+            try:
+                run_server_stdio(verbosity=Verbosity.normal)
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = Thread(target=run, daemon=True)
+        thread.start()
+
+        client_reader = os.fdopen(client_read_fd, "rb")
+        client_writer = os.fdopen(client_write_fd, "wb", buffering=0)
+        client_transport = StdioTransport(client_reader, client_writer)
+
+        try:
+            write_packet(
+                client_transport,
+                Packet(
+                    stream_id=0,
+                    message_id=1,
+                    is_reply=False,
+                    payload=HANDSHAKE_STRING,
+                ),
+            )
+            reply = read_packet(client_transport)
+            assert reply.payload == f"Hegel/{PROTOCOL_VERSION}".encode("ascii")
+
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+            assert len(errors) == 1
+            assert isinstance(errors[0], ValueError)
+            assert "Unknown test mode" in str(errors[0])
+        finally:
+            client_transport.close()
+            thread.join(timeout=2)

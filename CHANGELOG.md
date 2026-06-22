@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.10.0 - 2026-06-08
+
+This release adds the `new_state_machine` and `state_machine_next_rule` commands to the protocol. This release also implements swarm testing for state machines.
+
+## 0.9.1 - 2026-05-15
+
+This release adds the `allow_nan` and `allow_infinity` boolean arguments to `FloatConformance()`. This makes it possible for clients where infinity or nan is not supported to run float conformance tests.
+
+## 0.9.0 - 2026-05-13
+
+This release adds a `report_multiple_failures` field to the `run_test`
+protocol message, which maps to Hypothesis's `report_multiple_bugs`
+setting. When `False`, Hypothesis collapses multi-bug runs to a single
+failing example rather than surfacing one per distinct origin; the
+default (`True`) preserves the existing behaviour.
+
+The protocol version bumps from `0.14` to `0.15` so clients can detect
+whether the server understands the new field.
+
+## 0.8.2 - 2026-05-11
+
+This patch fixes a stdio-server shutdown deadlock that could occur under `uv`
+when the server exited after an error while stdin remained open.
+
 ## 0.8.1 - 2026-05-07
 
 This patch adds support for Hypothesis's observability feature: https://hypothesis.readthedocs.io/en/latest/reference/integrations.html#observability.
