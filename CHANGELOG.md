@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 - 2026-06-08
+
+This release adds the `new_state_machine` and `state_machine_next_rule` commands to the protocol. This release also implements swarm testing for state machines.
+
+## 0.9.1 - 2026-05-15
+
+This release adds the `allow_nan` and `allow_infinity` boolean arguments to `FloatConformance()`. This makes it possible for clients where infinity or nan is not supported to run float conformance tests.
+
 ## 0.9.0 - 2026-05-13
 
 This release adds a `report_multiple_failures` field to the `run_test`
