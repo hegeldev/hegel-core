@@ -853,12 +853,12 @@ labeled group.
 ### Thread Safety
 
 - Use thread-local storage for connection state.
-- Atomic operations for request ID counter.
+- Use atomic operations for request ID counter.
 - Each thread maintains independent connection.
 
 ### Reading packets from the Connection
 
-The Hegel protocol uses a **demand-driven reader** reader. When a stream needs
+The Hegel protocol uses a **demand-driven reader**. When a stream needs
 a message, it drives the connection's reader to read from the transport until
 the needed message arrives (or a timeout is reached).
 
@@ -880,7 +880,7 @@ the needed message arrives (or a timeout is reached).
 - **No background thread**: There is no dedicated reader thread. Reading
   happens on the calling thread when a stream needs data.
 - **Reader lock**: Only one thread reads from the transport at a time. The
-  lock is acquired non-blocking — other threads poll until it's available.
+  lock is acquired, and non-blocking — other threads poll until it's available.
 - **Short read timeouts**: `read_packet` uses a short read timeout (e.g.
   100ms) so the reader can periodically check the `until` condition.
 - **Close is simple**: Set `running = false`, close the transport, close
@@ -954,7 +954,7 @@ The following conformance tests are required:
 
 | Test | Parameters | Validates |
 |------|-----------|-----------|
-| `BooleanConformance` | (none) | Value is `true` or `false` |
+| `BooleanConformance` | (no parameters) | Value is `true` or `false` |
 | `IntegerConformance` | `min_value`, `max_value` | Value within bounds |
 | `FloatConformance` | `min_value`, `max_value`, `exclude_min`, `exclude_max`, `allow_nan`, `allow_infinity` | Value within bounds, NaN/infinity generated when allowed |
 | `TextConformance` | `min_size`, `max_size` | Codepoint length within bounds |
@@ -1112,7 +1112,7 @@ reference for new implementations.
 - `isinstance(gen, BasicGenerator)` is used by combinators to check basicness.
 - The `_raw_schema` and `_transform` attributes are accessed directly by
   combinators (they are nominally private but used within the module).
-- `sampled_from` uses the integer-index approach for all types.
+- `sampled_from` uses the integer index approach for all types.
 - `just` uses `{"type": "constant", "value": null}` schema with a transform that ignores input.
 
 ### Rust
@@ -1125,7 +1125,7 @@ reference for new implementations.
 - `map()` on the `Generate` trait returns `Mapped` which implements
   `as_basic()` by checking the source's `as_basic()` and composing via
   `BasicGenerator::map()`. This preserves schemas through `map()`.
-- `sampled_from` always uses the integer-index approach (matching the
+- `sampled_from` always uses the integer index approach (matching the
   reference Python implementation) and is always basic.
 - `just` works with any `Clone + Send + Sync` type and always uses
   `{"type": "constant", "value": null}` with a transform that returns the constant value.
