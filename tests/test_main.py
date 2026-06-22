@@ -185,6 +185,15 @@ def test_run_server_stdio_test_mode():
     _run_stdio_test(env={"HEGEL_PROTOCOL_TEST_MODE": "empty_test"})
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason=(
+        "Stdin doesn't close on Windows after a server-side error, so the "
+        "reader thread blocks instead of shutting down cleanly. "
+        "See https://github.com/hegeldev/hegel-core/issues/130."
+    ),
+    strict=False,
+)
 def test_run_server_stdio_closes_after_error_with_open_stdin(monkeypatch):
     monkeypatch.setenv("HEGEL_PROTOCOL_TEST_MODE", "not-a-real-mode")
 

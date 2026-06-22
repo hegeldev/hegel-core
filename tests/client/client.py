@@ -1,6 +1,6 @@
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from typing import Any
 
@@ -122,6 +122,7 @@ class Client:
         derandomize: bool = False,
         database: str | None | UniqueIdentifier = not_set,
         phases: list[str] | None = None,
+        report_multiple_failures: bool | None = None,
     ) -> None:
         """Run a property test."""
 
@@ -142,6 +143,8 @@ class Client:
             message["suppress_health_check"] = suppress_health_check
         if phases is not None:
             message["phases"] = phases
+        if report_multiple_failures is not None:
+            message["report_multiple_failures"] = report_multiple_failures
 
         with self.__lock:
             self._control.send_request(message)
@@ -352,6 +355,39 @@ def stop_span(*, discard: bool = False) -> None:
     if _test_aborted.get():
         return
     _request({"command": "stop_span", "discard": discard})
+
+
+def run_state_machine(
+    rules: Sequence[Callable[[], None]],
+    *,
+    invariants: Sequence[Callable[[], None]] = (),
+    steps: int,
+) -> None:
+    state_machine_id = _request(
+        {
+            "command": "new_state_machine",
+            "rules": [{"name": rule.__name__} for rule in rules],
+            "invariants": [{"name": invariant.__name__} for invariant in invariants],
+        }
+    )
+
+    def check_invariants() -> None:
+        for invariant in invariants:
+            invariant()
+
+    check_invariants()
+    for _ in range(steps):
+        index = _request(
+            {
+                "command": "state_machine_next_rule",
+                "state_machine_id": state_machine_id,
+            }
+        )
+        try:
+            rules[index]()
+        except AssumeRejected:
+            continue
+        check_invariants()
 
 
 class collection:
