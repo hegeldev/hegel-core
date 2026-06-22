@@ -41,7 +41,7 @@ When a generator has no schema, it falls back to **compositional generation**:
 making multiple requests to the server, wrapped in spans for structure tracking.
 
 Schema-based generation is preferred because:
-1. It reduces round-trips between the client and the server.
+1. It reduces round trips between the client and the server.
 2. It gives the server (Hypothesis) a complete picture of the data structure,
    enabling better shrinking.
 
@@ -102,7 +102,7 @@ A generator is basic (i.e. has a schema and optional transform) in these cases:
 | `dicts(keys, values)` | If both are basic | `{"type": "dict", "keys": ..., "values": ..., ...}` | Applies key/value transforms, converts pairs to dict |
 | `one_of(g1, g2, ...)` | If ALL branches are basic | `{"type": "one_of", "generators": [...]}` | Dispatches per-branch transform on the response index. See below |
 | `optional(element)` | If `element` is basic | Via `one_of(just(None), element)` | Via one_of |
-| Format generators (emails, urls, etc.) | Always | `{"type": "email"}` etc. | None |
+| Format generators (emails, URLs, etc.) | Always | `{"type": "email"}` etc. | None |
 | `from_regex(pattern)` | Always | `{"type": "regex", ...}` | None |
 
 ### Non-basic fallback
