@@ -175,7 +175,7 @@ Generate boolean values.
 
 **Parameters:**
 - `p` (float, optional): Probability of `true`. Default: 0.5. (Python only;
-  Rust and C++ currently use uniform probability.)
+  Rust and C++ currently use uniform probability).
 
 **Schema:**
 ```json
@@ -300,13 +300,13 @@ Generate strings matching a regular expression pattern.
 **Parameters:**
 - `pattern` (string): The regex pattern.
 - `fullmatch` (bool): Whether the entire string must match. Default: `false`.
-- `alphabet` (Characters, optional): Constrain which characters may appear in
+- `alphabet` (characters, optional): Constrain which characters may appear in
   generated strings. Accepts a `characters()` value. When unspecified, the
   server generates from the full Unicode range.
 
 **Schema:**
 ```json
-{"type": "regex", "pattern": <string>, "fullmatch": <bool>, "alphabet": {...}}
+{"type": "regex", "pattern": <string>, "fullmatch": <bool>, "alphabet": [...]}
 ```
 
 The `alphabet` object contains the same character filtering keys as `text`:
@@ -384,8 +384,8 @@ gen.filter(predicate) -> Generator
 **Always non-basic.** The resulting generator has no schema because
 predicates cannot be expressed in the schema language.
 
-Tries up to 3 times to generate a value satisfying the predicate. If all
-3 attempts fail, calls `assume(false)` to reject the test case.
+Tries up to three times to generate a value satisfying the predicate. If all
+three attempts fail, calls `assume(false)` to reject the test case.
 
 Each attempt is wrapped in a span with label `FILTER`. Successful attempts
 close the span normally; failed attempts close with `discard=true`.
