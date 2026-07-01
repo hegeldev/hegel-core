@@ -1,9 +1,6 @@
 > [!IMPORTANT]
-> We're excited you're checking out Hegel! Hegel is in beta, and we'd love for you to try it and [report any feedback](https://github.com/hegeldev/hegel-core/issues/new).
->
-> As part of our beta, we may make breaking changes if it makes Hegel a better property-based testing protocol. If that instability bothers you, please check back in a few months for a stable release!
->
-> See https://hegel.dev/compatibility for more details.
+> This is an old implementation that is no longer used. Existing users are strongly recommended to migrate to
+> the new FFI based approach, which can be found in the [hegel-rust repository](https://github.com/hegeldev/hegel-rust/tree/main/hegel-c)
 
 # Hegel
 
@@ -12,5 +9,3 @@
 * [hegel-go](https://github.com/hegeldev/hegel-go)
 * [hegel-cpp](https://github.com/hegeldev/hegel-cpp)
 * [hegel-typescript](https://github.com/hegeldev/hegel-typescript)
-
-The Hegel protocol and server, built on [Hypothesis](https://github.com/hypothesisworks/hypothesis).  `hegel-core` provides the core functionality of a property-based testing library, including data generation and shrinking.
